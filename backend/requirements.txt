@@ -1,0 +1,37 @@
+# ── Web Framework ──────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# ── Database ────────────────────────────────────────────────────
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+alembic==1.13.1
+
+# ── Validation ──────────────────────────────────────────────────
+pydantic==2.7.1
+pydantic-settings==2.2.1
+
+# ── Resume Parsing ──────────────────────────────────────────────
+pdfplumber==0.11.0
+python-docx==1.1.2
+spacy==3.7.4
+
+# ── Matching / ML ────────────────────────────────────────────────
+# ⚠ sentence-transformers pulls in torch + transformers.
+#   First install downloads ~2 GB of model weights + framework.
+#   Allow 5-15 min on a first run (subsequent installs use cache).
+#   All computation runs on CPU — no GPU required.
+#
+#   Python 3.13 note: numpy 2.1+ required (1.x has no py313 wheels).
+sentence-transformers==3.3.1
+numpy==2.1.3
+
+# ── Automation / Browser ─────────────────────────────────────────
+# ⚠ After installing, run: playwright install chromium
+playwright>=1.48.0
+
+# ── Utilities ───────────────────────────────────────────────────
+python-dateutil==2.9.0.post0
+aiofiles==23.2.1
+httpx==0.27.0

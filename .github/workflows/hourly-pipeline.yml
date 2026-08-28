@@ -1,0 +1,53 @@
+name: Hourly Job Automation Pipeline
+
+on:
+  schedule:
+    # Runs every hour at minute 0 (UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  run-pipeline:
+    name: Trigger AutoApply Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Required Secrets
+        run: |
+          if [ -z "${{ secrets.BACKEND_URL }}" ]; then
+            echo "::error::Secret BACKEND_URL is missing. Add it in Repo Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          if [ -z "${{ secrets.RESUME_ID }}" ]; then
+            echo "::error::Secret RESUME_ID is missing. Add it in Repo Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+
+      - name: Ping Backend & Execute Pipeline
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          RESUME_ID: ${{ secrets.RESUME_ID }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          echo "Triggering AutoApply pipeline for Resume ID: $RESUME_ID"
+          echo "Target Endpoint: $BACKEND_URL/api/pipeline/run/$RESUME_ID"
+          
+          # Allow up to 300s timeout for Render cold-start & full browser execution
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST "$BACKEND_URL/api/pipeline/run/$RESUME_ID" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $PIPELINE_API_KEY" \
+            --max-time 300)
+          
+          HTTP_BODY=$(echo "$RESPONSE" | sed -e '$d')
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d':' -f2)
+
+          echo "Response Status: $HTTP_STATUS"
+          echo "Response Body: $HTTP_BODY"
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::error::Pipeline failed with HTTP status $HTTP_STATUS"
+            exit 1
+          fi
+          
+          echo "Pipeline run completed successfully."

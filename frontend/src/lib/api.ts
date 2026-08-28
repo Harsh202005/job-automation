@@ -1,0 +1,187 @@
+import axios from 'axios';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// ── TypeScript Interfaces ───────────────────────────────────────────────────
+
+export interface ExperienceItem {
+  title: string;
+  company: string;
+  duration?: string;
+  description?: string;
+}
+
+export interface EducationItem {
+  degree: string;
+  institution: string;
+  year?: string;
+}
+
+export interface ParsedResume {
+  id: string;
+  filename: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  skills: string[];
+  experience: ExperienceItem[];
+  education: EducationItem[];
+  total_experience_years: number;
+  parse_warnings: string[];
+}
+
+export interface Job {
+  id: string;
+  source: string;
+  source_job_id: string;
+  company: string;
+  title: string;
+  location?: string | null;
+  description?: string;
+  apply_url: string;
+  posted_at?: string | null;
+  fetched_at: string;
+}
+
+export interface IngestSummary {
+  fetched: number;
+  new: number;
+  updated: number;
+  errors: number;
+}
+
+export interface MatchDetail {
+  id: string;
+  resume_id: string;
+  job_id: string;
+  score: number;
+  matched_skills: string[];
+  missing_skills: string[];
+  computed_at: string;
+  job?: Job;
+}
+
+export interface ComputeMatchesSummary {
+  resume_id: string;
+  total_jobs: number;
+  matches_computed: number;
+  top_score: number;
+}
+
+export interface ApplicationJobInfo {
+  id: string;
+  company: string;
+  title: string;
+  location?: string | null;
+  source: string;
+  apply_url: string;
+}
+
+export interface ApplicationItem {
+  id: string;
+  resume_id: string;
+  job_id: string;
+  status: 'pending_review' | 'submitted' | 'failed' | 'skipped';
+  submitted_at?: string | null;
+  created_at: string;
+  has_screenshot: boolean;
+  error_message?: string | null;
+  job?: ApplicationJobInfo | null;
+}
+
+export interface ApplyBatchSummary {
+  attempted: number;
+  submitted: number;
+  pending_review: number;
+  failed: number;
+  applications: {
+    application_id: string;
+    job_id: string;
+    company: string;
+    title: string;
+    source: string;
+    status: string;
+    error_message?: string | null;
+    has_screenshot: boolean;
+  }[];
+}
+
+// ── API Functions ───────────────────────────────────────────────────────────
+
+// Resume API
+export async function uploadResume(file: File): Promise<ParsedResume> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await apiClient.post<ParsedResume>('/api/resume/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data;
+}
+
+export async function getResume(resumeId: string): Promise<ParsedResume> {
+  const res = await apiClient.get<ParsedResume>(`/api/resume/${resumeId}`);
+  return res.data;
+}
+
+// Jobs API
+export async function ingestJobs(): Promise<IngestSummary> {
+  const res = await apiClient.post<IngestSummary>('/api/jobs/ingest');
+  return res.data;
+}
+
+export async function getJobs(params?: {
+  company?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ total: number; limit: number; offset: number; results: Job[] }> {
+  const res = await apiClient.get('/api/jobs', { params });
+  return res.data;
+}
+
+// Matches API
+export async function computeMatches(resumeId: string): Promise<ComputeMatchesSummary> {
+  const res = await apiClient.post<ComputeMatchesSummary>(`/api/matches/compute/${resumeId}`);
+  return res.data;
+}
+
+export async function getMatches(
+  resumeId: string,
+  params?: { min_score?: number; limit?: number; offset?: number }
+): Promise<{ total: number; resume_id: string; limit: number; offset: number; results: MatchDetail[] }> {
+  const res = await apiClient.get(`/api/matches/${resumeId}`, { params });
+  return res.data;
+}
+
+// Applications API
+export async function runApplyBatch(
+  resumeId: string,
+  params?: { min_score?: number; limit?: number }
+): Promise<ApplyBatchSummary> {
+  const res = await apiClient.post<ApplyBatchSummary>(`/api/applications/run/${resumeId}`, null, {
+    params,
+  });
+  return res.data;
+}
+
+export async function getApplications(params?: {
+  status?: string;
+  resume_id?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ total: number; limit: number; offset: number; results: ApplicationItem[] }> {
+  const res = await apiClient.get('/api/applications', { params });
+  return res.data;
+}
+
+export function getApplicationScreenshotUrl(applicationId: string): string {
+  return `${API_BASE_URL}/api/applications/${applicationId}/screenshot`;
+}

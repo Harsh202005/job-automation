@@ -1,0 +1,35 @@
+services:
+  # ── FastAPI Backend Web Service ─────────────────────────────────────────────
+  - type: web
+    name: autoapply-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt && playwright install --with-deps chromium"
+    startCommand: "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: autoapply-db
+          property: connectionString
+      - key: PIPELINE_API_KEY
+        generateValue: true
+      - key: GREENHOUSE_BOARD_TOKENS
+        value: stripe,airbnb,figma,notion
+      - key: LEVER_COMPANY_SLUGS
+        value: netflix,spotify,linear,vercel
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DEBUG
+        value: "false"
+
+# ── Free PostgreSQL Database ──────────────────────────────────────────────────
+databases:
+  - name: autoapply-db
+    plan: free
+    region: oregon
+    databaseName: jobautomate
+    user: jobautomate_user
