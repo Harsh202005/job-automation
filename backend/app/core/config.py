@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # API key required to trigger automated pipeline execution via cron
     pipeline_api_key: str = ""
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        if isinstance(v, str):
+            # Render / Heroku / Supabase default scheme conversion
+            if v.startswith("postgres://"):
+                return v.replace("postgres://", "postgresql+asyncpg://", 1)
+            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     @field_validator("greenhouse_board_tokens", "lever_company_slugs", mode="before")
     @classmethod
     def parse_csv_list(cls, v: str | list[str]) -> list[str]:
