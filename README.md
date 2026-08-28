@@ -2,6 +2,8 @@
 
 > **Free/open-source job-application automation tool.**  
 > Built with Python 3.11/3.13 · FastAPI · PostgreSQL · Playwright · React + Vite + TypeScript
+> 
+> *Automated job discovery, offline semantic matching & smart application pipelines.*
 
 ---
 
