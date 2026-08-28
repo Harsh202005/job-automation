@@ -1,0 +1,3 @@
+# Tell Vercel to ignore backend entirely (Backend is deployed on Render)
+backend
+backend/**
