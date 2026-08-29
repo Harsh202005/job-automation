@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadResume, getResume, getLatestResume, getMatches, ParsedResume, MatchDetail } from '../lib/api';
+import { extractPdfTextInBrowser, parseResumeText } from '../lib/clientParser';
 import {
   UploadCloud,
   FileText,
@@ -171,7 +172,16 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
     }, 1000);
 
     try {
-      // Execute upload request with 60s timeout signal
+      // 1. Instant In-Browser Parse (< 50ms) so user is NEVER blocked by server latency
+      try {
+        const text = await extractPdfTextInBrowser(file);
+        const localParsed = parseResumeText(text, file.name);
+        setParsedData(localParsed);
+      } catch (clientErr) {
+        console.debug('Client parse pre-pass note:', clientErr);
+      }
+
+      // 2. Synchronize with backend in background
       const res = await uploadResume(
         file,
         { autoMatch: autoMatchEnabled },
@@ -181,7 +191,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
       // Clear timer
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
-      // Instantly render parsed profile
+      // Update with server profile
       setParsedData(res);
       localStorage.setItem('autoapply_resume_id', res.id);
       onResumeUploaded(res.id);
@@ -194,19 +204,25 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       console.error(err);
 
-      if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
-        setError(
-          'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier). Please retry.'
-        );
+      // If we already rendered the client-side parsed profile, keep it and don't show blocking error!
+      if (parsedData && parsedData.skills && parsedData.skills.length > 0) {
+        setLoading(false);
+        setError(null);
       } else {
-        const errorMsg =
-          err.customMessage ||
-          err.response?.data?.detail ||
-          err.message ||
-          'Failed to parse resume within time limit. Please try again.';
-        setError(errorMsg);
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+          setError(
+            'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier). Please retry.'
+          );
+        } else {
+          const errorMsg =
+            err.customMessage ||
+            err.response?.data?.detail ||
+            err.message ||
+            'Failed to parse resume within time limit. Please try again.';
+          setError(errorMsg);
+        }
+        setLoading(false);
       }
-      setLoading(false);
     }
   };
 
