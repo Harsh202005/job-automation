@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadResume, getResume, getLatestResume, getMatches, ParsedResume, MatchDetail } from '../lib/api';
 import {
@@ -18,7 +18,8 @@ import {
   Building2,
   ExternalLink,
   Target,
-  CheckCircle2
+  RefreshCw,
+  Clock
 } from 'lucide-react';
 
 interface ResumePageProps {
@@ -29,6 +30,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [matchingStatus, setMatchingStatus] = useState<'idle' | 'matching' | 'ready'>('idle');
   const [initialLoading, setInitialLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,19 +39,29 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
   const [autoMatchEnabled, setAutoMatchEnabled] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Load existing or latest resume on mount
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const timerIntervalRef = useRef<number | null>(null);
+
+  // Load existing or latest resume on mount with a strict 4-second timeout safeguard
   useEffect(() => {
     const savedId = localStorage.getItem('autoapply_resume_id');
     setInitialLoading(true);
 
+    const controller = new AbortController();
+    const safetyTimeout = setTimeout(() => {
+      controller.abort();
+      setInitialLoading(false);
+    }, 4000);
+
     const loadResumeData = async (id?: string) => {
       try {
-        const resume = id ? await getResume(id) : await getLatestResume();
+        const resume = id
+          ? await getResume(id, controller.signal)
+          : await getLatestResume(controller.signal);
         setParsedData(resume);
         if (resume.id) {
           localStorage.setItem('autoapply_resume_id', resume.id);
           onResumeUploaded(resume.id);
-          // Fetch existing top matches
           try {
             const matchData = await getMatches(resume.id, { min_score: 0.3, limit: 4 });
             setTopMatches(matchData.results || []);
@@ -61,13 +73,31 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
           }
         }
       } catch (err) {
-        console.debug('No active or saved resume found:', err);
+        console.debug('No active or saved resume found or timed out:', err);
       } finally {
+        clearTimeout(safetyTimeout);
         setInitialLoading(false);
       }
     };
 
     loadResumeData(savedId || undefined);
+
+    return () => {
+      clearTimeout(safetyTimeout);
+      controller.abort();
+    };
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,27 +146,66 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
     }
 
     setLoading(true);
+    setElapsedSeconds(0);
     setError(null);
 
-    try {
-      // 1. Ultra-fast parse request (<100ms return)
-      const res = await uploadResume(file, {
-        autoMatch: autoMatchEnabled,
-      });
+    // Setup 60s timeout controller
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-      // 2. Render parsed profile immediately on screen!
+    // Start 1s interval timer
+    const startTime = Date.now();
+    timerIntervalRef.current = window.setInterval(() => {
+      const seconds = Math.floor((Date.now() - startTime) / 1000);
+      setElapsedSeconds(seconds);
+
+      // Hard 60-second limit
+      if (seconds >= 60) {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        controller.abort();
+        setLoading(false);
+        setError(
+          'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier) or undergoing a redeployment. Please click "Retry" to try again.'
+        );
+      }
+    }, 1000);
+
+    try {
+      // Execute upload request with 60s timeout signal
+      const res = await uploadResume(
+        file,
+        { autoMatch: autoMatchEnabled },
+        controller.signal
+      );
+
+      // Clear timer
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+
+      // Instantly render parsed profile
       setParsedData(res);
       localStorage.setItem('autoapply_resume_id', res.id);
       onResumeUploaded(res.id);
       setLoading(false);
 
-      // 3. Auto-load background matching results
       if (autoMatchEnabled) {
         pollMatches(res.id);
       }
     } catch (err: any) {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       console.error(err);
-      setError(err.response?.data?.detail || 'Failed to process resume. Please try again.');
+
+      if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+        setError(
+          'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier). Please retry.'
+        );
+      } else {
+        const errorMsg =
+          err.customMessage ||
+          err.response?.data?.detail ||
+          err.message ||
+          'Failed to parse resume within time limit. Please try again.';
+        setError(errorMsg);
+      }
       setLoading(false);
     }
   };
@@ -221,10 +290,33 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
           <p className="text-slate-500 text-xs mt-1">Accepts PDF & DOCX • High-Speed C++ & Layout Parser</p>
         </div>
 
+        {/* Informative server wake-up notice during upload */}
+        {loading && elapsedSeconds >= 8 && (
+          <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center justify-between gap-3 animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+              <span>
+                <strong>Connecting to backend:</strong> Free-tier cloud instances spin down after inactivity. Waking up container ({elapsedSeconds}s / max 60s)...
+              </span>
+            </div>
+            <span className="font-mono text-amber-400 font-bold shrink-0">{elapsedSeconds}s</span>
+          </div>
+        )}
+
+        {/* Error banner with Retry action */}
         {error && (
-          <div className="mt-4 p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>{error}</span>
+          <div className="mt-4 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={handleUploadAndAutoProcess}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-semibold self-start sm:self-auto transition-all"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry Upload
+            </button>
           </div>
         )}
 
@@ -259,7 +351,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Instant Parsing...
+                  {elapsedSeconds > 0 ? `Parsing (${elapsedSeconds}s)...` : 'Instant Parsing...'}
                 </>
               ) : (
                 <>
@@ -367,13 +459,13 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
 
       {/* ── Parsed Resume Details ────────────────────────────────────────── */}
       {initialLoading && (
-        <div className="flex items-center justify-center py-12 text-slate-400 text-sm gap-2">
-          <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
-          Loading active candidate profile...
+        <div className="flex items-center justify-center py-8 text-slate-400 text-xs gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+          Checking for active candidate profile...
         </div>
       )}
 
-      {parsedData && !initialLoading && (
+      {parsedData && (
         <div className="space-y-6 animate-fadeIn">
           {/* Parse Warnings */}
           {parsedData.parse_warnings && parsedData.parse_warnings.length > 0 && (

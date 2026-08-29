@@ -7,10 +7,22 @@ const API_BASE_URL =
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 60000, // 60 seconds (1 min) request timeout
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      error.customMessage =
+        'Request timed out after 1 minute. The backend server on Render free-tier might still be waking up. Please retry in a few moments.';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // ── TypeScript Interfaces ───────────────────────────────────────────────────
 
@@ -140,7 +152,8 @@ export interface PipelineRunResponse {
 // Resume API
 export async function uploadResume(
   file: File,
-  options: { autoMatch?: boolean; topMatchesLimit?: number } = { autoMatch: true, topMatchesLimit: 6 }
+  options: { autoMatch?: boolean; topMatchesLimit?: number } = { autoMatch: true, topMatchesLimit: 6 },
+  signal?: AbortSignal
 ): Promise<UploadResumeResponse> {
   const formData = new FormData();
   formData.append('file', file);
@@ -151,17 +164,18 @@ export async function uploadResume(
       top_matches_limit: options.topMatchesLimit ?? 6,
     },
     headers: { 'Content-Type': 'multipart/form-data' },
+    signal,
   });
   return res.data;
 }
 
-export async function getResume(resumeId: string): Promise<ParsedResume> {
-  const res = await apiClient.get<ParsedResume>(`/api/resume/${resumeId}`);
+export async function getResume(resumeId: string, signal?: AbortSignal): Promise<ParsedResume> {
+  const res = await apiClient.get<ParsedResume>(`/api/resume/${resumeId}`, { signal });
   return res.data;
 }
 
-export async function getLatestResume(): Promise<ParsedResume> {
-  const res = await apiClient.get<ParsedResume>('/api/resume/latest');
+export async function getLatestResume(signal?: AbortSignal): Promise<ParsedResume> {
+  const res = await apiClient.get<ParsedResume>('/api/resume/latest', { signal });
   return res.data;
 }
 
