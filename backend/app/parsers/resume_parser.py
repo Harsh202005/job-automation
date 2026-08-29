@@ -160,15 +160,18 @@ def _extract_text_pdf(file_path: Path) -> str:
         import pypdfium2 as pdfium  # noqa: PLC0415
 
         pdf = pdfium.PdfDocument(file_path)
-        pages_text: list[str] = []
-        for page in pdf:
-            textpage = page.get_textpage()
-            text = textpage.get_text_range()
-            if text and text.strip():
-                pages_text.append(text.strip())
-        full_text = "\n\n".join(pages_text)
-        if full_text.strip():
-            return full_text
+        try:
+            pages_text: list[str] = []
+            for page in pdf:
+                textpage = page.get_textpage()
+                text = textpage.get_text_range()
+                if text and text.strip():
+                    pages_text.append(text.strip())
+            full_text = "\n\n".join(pages_text)
+            if full_text.strip():
+                return full_text
+        finally:
+            pdf.close()
     except Exception as exc:
         logger.debug("pypdfium2 extraction skipped/failed: %s, falling back to pdfplumber", exc)
 
