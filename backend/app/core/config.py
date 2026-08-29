@@ -55,11 +55,17 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_database_url(cls, v: str) -> str:
         if isinstance(v, str):
+            import re
             # Render / Heroku / Supabase default scheme conversion
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
-            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+                v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+                v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+            # asyncpg doesn't support 'sslmode' query param — remove it to prevent connection hangs
+            if "sslmode=" in v:
+                v = re.sub(r"[?&]sslmode=[^&]*", "", v)
+                if "?" not in v and "&" in v:
+                    v = v.replace("&", "?", 1)
         return v
 
     @field_validator("greenhouse_board_tokens", "lever_company_slugs", mode="before")

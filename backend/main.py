@@ -46,16 +46,23 @@ def _prewarm_models():
 async def lifespan(app: FastAPI):
     from app.core.db import Base  # noqa: PLC0415
 
-    async with engine.begin() as conn:
-        logger.info("Running create_all (dev mode — use Alembic in prod)")
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with asyncio.timeout(5):
+            async with engine.begin() as conn:
+                logger.info("Running create_all (dev mode — use Alembic in prod)")
+                await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        logger.warning("Database create_all in lifespan skipped/handled: %s", exc)
 
     # Launch model pre-warming in background thread (non-blocking)
     asyncio.create_task(asyncio.to_thread(_prewarm_models))
 
     yield
-    await engine.dispose()
-    logger.info("Database engine disposed.")
+    try:
+        await engine.dispose()
+        logger.info("Database engine disposed.")
+    except Exception:
+        pass
 
 
 # ── Application ───────────────────────────────────────────────────────────────
