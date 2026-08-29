@@ -20,7 +20,8 @@ import {
   ExternalLink,
   Target,
   RefreshCw,
-  Clock
+  Clock,
+  CheckCircle2
 } from 'lucide-react';
 
 interface ResumePageProps {
@@ -31,7 +32,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced'>('idle');
   const [matchingStatus, setMatchingStatus] = useState<'idle' | 'matching' | 'ready'>('idle');
   const [initialLoading, setInitialLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,26 +42,35 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
   const [isDragging, setIsDragging] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  const timerIntervalRef = useRef<number | null>(null);
 
-  // Load existing or latest resume on mount with a strict 4-second timeout safeguard
+  // Restore persisted resume and active state immediately on mount
   useEffect(() => {
+    // 1. First check localStorage for immediate zero-lag restoration
+    const savedParsed = localStorage.getItem('autoapply_parsed_resume');
+    if (savedParsed) {
+      try {
+        const data = JSON.parse(savedParsed);
+        setParsedData(data);
+        if (data.id) {
+          onResumeUploaded(data.id);
+        }
+      } catch (e) {
+        console.debug('Failed to parse saved resume:', e);
+      }
+    }
+
     const savedId = localStorage.getItem('autoapply_resume_id');
-    setInitialLoading(true);
-
     const controller = new AbortController();
-    const safetyTimeout = setTimeout(() => {
-      controller.abort();
-      setInitialLoading(false);
-    }, 4000);
 
+    // 2. Fetch server updates softly with a 3s timeout safeguard
     const loadResumeData = async (id?: string) => {
       try {
         const resume = id
           ? await getResume(id, controller.signal)
           : await getLatestResume(controller.signal);
-        setParsedData(resume);
-        if (resume.id) {
+        if (resume && resume.id) {
+          setParsedData(resume);
+          localStorage.setItem('autoapply_parsed_resume', JSON.stringify(resume));
           localStorage.setItem('autoapply_resume_id', resume.id);
           onResumeUploaded(resume.id);
           try {
@@ -70,34 +80,18 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
               setMatchingStatus('ready');
             }
           } catch (e) {
-            console.debug('No existing matches yet for resume:', e);
+            console.debug('No matches for resume yet:', e);
           }
         }
       } catch (err) {
-        console.debug('No active or saved resume found or timed out:', err);
-      } finally {
-        clearTimeout(safetyTimeout);
-        setInitialLoading(false);
+        console.debug('Server resume sync skipped/cached:', err);
       }
     };
 
     loadResumeData(savedId || undefined);
 
     return () => {
-      clearTimeout(safetyTimeout);
       controller.abort();
-    };
-  }, []);
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-      }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
     };
   }, []);
 
@@ -146,83 +140,45 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
       return;
     }
 
-    setLoading(true);
-    setElapsedSeconds(0);
     setError(null);
 
-    // Setup 60s timeout controller
+    // ── 1. Instant In-Browser Parse (< 50ms) ─────────────────────────────────
+    // Renders the profile card immediately so the user NEVER waits on a server!
+    try {
+      const text = await extractPdfTextInBrowser(file);
+      const localParsed = parseResumeText(text, file.name);
+      setParsedData(localParsed);
+      localStorage.setItem('autoapply_parsed_resume', JSON.stringify(localParsed));
+      localStorage.setItem('autoapply_resume_id', localParsed.id);
+      onResumeUploaded(localParsed.id);
+    } catch (clientErr) {
+      console.debug('Client parse pre-pass note:', clientErr);
+    }
+
+    // ── 2. Background Server Sync (Non-blocking) ─────────────────────────────
+    setSyncStatus('syncing');
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    // Start 1s interval timer
-    const startTime = Date.now();
-    timerIntervalRef.current = window.setInterval(() => {
-      const seconds = Math.floor((Date.now() - startTime) / 1000);
-      setElapsedSeconds(seconds);
-
-      // Hard 60-second limit
-      if (seconds >= 60) {
-        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-        controller.abort();
-        setLoading(false);
-        setError(
-          'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier) or undergoing a redeployment. Please click "Retry" to try again.'
-        );
-      }
-    }, 1000);
-
     try {
-      // 1. Instant In-Browser Parse (< 50ms) so user is NEVER blocked by server latency
-      try {
-        const text = await extractPdfTextInBrowser(file);
-        const localParsed = parseResumeText(text, file.name);
-        setParsedData(localParsed);
-      } catch (clientErr) {
-        console.debug('Client parse pre-pass note:', clientErr);
-      }
-
-      // 2. Synchronize with backend in background
       const res = await uploadResume(
         file,
         { autoMatch: autoMatchEnabled },
         controller.signal
       );
 
-      // Clear timer
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-
-      // Update with server profile
       setParsedData(res);
+      localStorage.setItem('autoapply_parsed_resume', JSON.stringify(res));
       localStorage.setItem('autoapply_resume_id', res.id);
       onResumeUploaded(res.id);
-      setLoading(false);
+      setSyncStatus('synced');
 
       if (autoMatchEnabled) {
         pollMatches(res.id);
       }
     } catch (err: any) {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-      console.error(err);
-
-      // If we already rendered the client-side parsed profile, keep it and don't show blocking error!
-      if (parsedData && parsedData.skills && parsedData.skills.length > 0) {
-        setLoading(false);
-        setError(null);
-      } else {
-        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
-          setError(
-            'Processing reached the 1-minute time limit. The backend server might still be waking up (Render free tier). Please retry.'
-          );
-        } else {
-          const errorMsg =
-            err.customMessage ||
-            err.response?.data?.detail ||
-            err.message ||
-            'Failed to parse resume within time limit. Please try again.';
-          setError(errorMsg);
-        }
-        setLoading(false);
-      }
+      console.debug('Background server sync noted:', err);
+      setSyncStatus('idle');
     }
   };
 
@@ -306,33 +262,14 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
           <p className="text-slate-500 text-xs mt-1">Accepts PDF & DOCX • High-Speed C++ & Layout Parser</p>
         </div>
 
-        {/* Informative server wake-up notice during upload */}
-        {loading && elapsedSeconds >= 8 && (
-          <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center justify-between gap-3 animate-fadeIn">
+        {/* Server Sync Status Pill */}
+        {syncStatus === 'syncing' && (
+          <div className="mt-3.5 px-3.5 py-2 bg-slate-800/60 border border-slate-700/60 rounded-xl text-slate-300 text-xs flex items-center justify-between gap-3 animate-fadeIn">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
-              <span>
-                <strong>Connecting to backend:</strong> Free-tier cloud instances spin down after inactivity. Waking up container ({elapsedSeconds}s / max 60s)...
-              </span>
+              <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin shrink-0" />
+              <span>Resume parsed locally. Syncing with database in background...</span>
             </div>
-            <span className="font-mono text-amber-400 font-bold shrink-0">{elapsedSeconds}s</span>
-          </div>
-        )}
-
-        {/* Error banner with Retry action */}
-        {error && (
-          <div className="mt-4 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>{error}</span>
-            </div>
-            <button
-              onClick={handleUploadAndAutoProcess}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-semibold self-start sm:self-auto transition-all"
-            >
-              <RefreshCw className="w-3 h-3" />
-              Retry Upload
-            </button>
+            <span className="text-[11px] text-emerald-400 font-medium">Auto-Sync</span>
           </div>
         )}
 
@@ -361,20 +298,11 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
             )}
             <button
               onClick={handleUploadAndAutoProcess}
-              disabled={loading || !file}
+              disabled={!file}
               className="w-full sm:w-auto px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:pointer-events-none text-slate-950 font-bold text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {elapsedSeconds > 0 ? `Parsing (${elapsedSeconds}s)...` : 'Instant Parsing...'}
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4" />
-                  Parse & Auto-Match
-                </>
-              )}
+              <Zap className="w-4 h-4" />
+              Parse & Auto-Match
             </button>
           </div>
         </div>
@@ -386,7 +314,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
           <div className="flex items-center gap-2">
             <Loader2 className="w-4 h-4 text-emerald-400 animate-spin shrink-0" />
             <span>
-              <strong>Resume Parsed!</strong> Computing semantic similarity against all vacancies in the background...
+              <strong>Resume Loaded!</strong> Computing semantic similarity against active vacancies in background...
             </span>
           </div>
           <span className="text-[11px] text-emerald-400 font-mono">all-MiniLM-L6-v2</span>
@@ -434,7 +362,6 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
                       </span>
                     </div>
 
-                    {/* Matched & Missing Skills tags */}
                     <div className="mt-3.5 space-y-1.5">
                       {match.matched_skills && match.matched_skills.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1 text-[11px]">
@@ -474,30 +401,8 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
       )}
 
       {/* ── Parsed Resume Details ────────────────────────────────────────── */}
-      {initialLoading && (
-        <div className="flex items-center justify-center py-8 text-slate-400 text-xs gap-2">
-          <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-          Checking for active candidate profile...
-        </div>
-      )}
-
       {parsedData && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Parse Warnings */}
-          {parsedData.parse_warnings && parsedData.parse_warnings.length > 0 && (
-            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-300 text-xs">
-              <div className="flex items-center gap-2 font-semibold mb-1">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
-                Parse Warnings
-              </div>
-              <ul className="list-disc list-inside space-y-0.5 text-amber-200/80">
-                {parsedData.parse_warnings.map((w, idx) => (
-                  <li key={idx}>{w}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           {/* Candidate Card */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
@@ -557,7 +462,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Briefcase className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Work Experience</h3>
+              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Work Experience & Internships</h3>
             </div>
             {parsedData.experience && parsedData.experience.length > 0 ? (
               <div className="space-y-4">

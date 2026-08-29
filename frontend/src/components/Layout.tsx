@@ -60,26 +60,44 @@ export const Layout: React.FC<LayoutProps> = ({ activeResumeId }) => {
 
         {/* Active Resume Indicator Widget */}
         <div className="p-4 border-t border-slate-800/80 bg-slate-900/40">
-          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 text-xs">
-            <div className="flex items-center gap-2 mb-1 text-slate-300 font-medium">
-              {activeResumeId ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="truncate">Active Resume Loaded</span>
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>No Active Resume</span>
-                </>
-              )}
-            </div>
-            {activeResumeId ? (
-              <p className="text-[11px] text-slate-500 font-mono truncate">ID: {activeResumeId}</p>
-            ) : (
-              <p className="text-[11px] text-slate-400">Upload a resume to enable match scoring & auto-apply.</p>
-            )}
-          </div>
+          {(() => {
+            let candidateName = '';
+            try {
+              const saved = localStorage.getItem('autoapply_parsed_resume');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                candidateName = parsed.full_name || '';
+              }
+            } catch (e) {
+              console.debug(e);
+            }
+            const isLoaded = Boolean(activeResumeId || candidateName);
+
+            return (
+              <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 text-xs">
+                <div className="flex items-center gap-2 mb-1 text-slate-300 font-medium">
+                  {isLoaded ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="truncate">Active Candidate Profile</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>No Active Resume</span>
+                    </>
+                  )}
+                </div>
+                {isLoaded ? (
+                  <p className="text-[11px] text-emerald-400 font-semibold truncate">
+                    {candidateName || `Resume Loaded (${activeResumeId})`}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-400">Upload a resume to enable match scoring & auto-apply.</p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </aside>
 

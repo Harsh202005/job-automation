@@ -89,7 +89,8 @@ export function parseResumeText(text: string, filename: string): ParsedResume {
     if (line.includes('@') || line.includes('+') || line.includes('http') || line.toLowerCase().includes('resume')) {
       continue;
     }
-    const words = line.replace(/[^a-zA-Z\s]/g, '').trim().split(/\s+/);
+    let cleanedLine = line.replace(/^(TITLE|NAME|CANDIDATE|CV|RESUME)[:\s]+/i, '').trim();
+    const words = cleanedLine.replace(/[^a-zA-Z\s]/g, '').trim().split(/\s+/);
     if (words.length >= 2 && words.length <= 4) {
       full_name = words.join(' ');
       break;
