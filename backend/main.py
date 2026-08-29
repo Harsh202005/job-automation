@@ -41,7 +41,7 @@ def _prewarm_models():
         logger.debug("Embedding model pre-warming skipped: %s", exc)
 
 
-# ── Lifespan: create tables & prewarm models on startup ───────────────────────
+# ── Lifespan: create tables on startup ─────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.db import Base  # noqa: PLC0415
@@ -53,9 +53,6 @@ async def lifespan(app: FastAPI):
                 await conn.run_sync(Base.metadata.create_all)
     except Exception as exc:
         logger.warning("Database create_all in lifespan skipped/handled: %s", exc)
-
-    # Launch model pre-warming in background thread (non-blocking)
-    asyncio.create_task(asyncio.to_thread(_prewarm_models))
 
     yield
     try:
