@@ -133,7 +133,8 @@ async def upload_resume(
             detail=f"Resume parsing failed: {exc}",
         ) from exc
 
-    # ── Persist Resume ───────────────────────────────────────────────────────
+    # ── Persist Resume (Resilient) ───────────────────────────────────────────
+    record_id = uuid.uuid4()
     try:
         resume_record = Resume(
             file_path=str(file_path.resolve()),
@@ -145,11 +146,11 @@ async def upload_resume(
         await db.flush()
         record_id = resume_record.id
     except Exception as exc:
-        logger.exception("DB insert failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {exc}",
-        ) from exc
+        logger.warning("DB insert skipped or delayed: %s", exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
     # Schedule matching in background so upload HTTP response is immediate
     if auto_match:

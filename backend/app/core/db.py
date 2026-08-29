@@ -6,6 +6,11 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
+# Configure connect_args with fast connection timeout so slow/sleeping DB never hangs the server
+connect_args = {}
+if "asyncpg" in settings.database_url:
+    connect_args = {"timeout": 5.0, "command_timeout": 10.0}
+
 # ── Engine ────────────────────────────────────────────────────────────────────
 engine = create_async_engine(
     settings.database_url,
@@ -13,6 +18,7 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
+    connect_args=connect_args,
 )
 
 # ── Session factory ───────────────────────────────────────────────────────────
@@ -36,7 +42,11 @@ async def get_db() -> AsyncSession:  # type: ignore[return]
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
+            if session.is_active:
+                await session.commit()
         except Exception:
-            await session.rollback()
+            if session.is_active:
+                await session.rollback()
             raise
+        finally:
+            await session.close()
