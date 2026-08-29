@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { computeMatches, getMatches, MatchDetail, ComputeMatchesSummary } from '../lib/api';
+import { computeMatches, getMatches, getLatestResume, MatchDetail, ComputeMatchesSummary } from '../lib/api';
 import { Sparkles, Building2, ExternalLink, SlidersHorizontal, AlertCircle, CheckCircle2, ArrowUpDown, Loader2, ArrowRight } from 'lucide-react';
 
 interface MatchesPageProps {
@@ -8,26 +8,52 @@ interface MatchesPageProps {
 }
 
 export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
+  const [activeId, setActiveId] = useState<string | null>(resumeId);
   const [matches, setMatches] = useState<MatchDetail[]>([]);
   const [total, setTotal] = useState(0);
-  const [minScore, setMinScore] = useState(0.4);
+  const [minScore, setMinScore] = useState(0.3);
   const [loading, setLoading] = useState(false);
   const [computing, setComputing] = useState(false);
   const [summary, setSummary] = useState<ComputeMatchesSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
 
+  useEffect(() => {
+    if (resumeId) {
+      setActiveId(resumeId);
+    } else {
+      const saved = localStorage.getItem('autoapply_resume_id');
+      if (saved) {
+        setActiveId(saved);
+      } else {
+        getLatestResume()
+          .then((r) => {
+            if (r?.id) {
+              setActiveId(r.id);
+              localStorage.setItem('autoapply_resume_id', r.id);
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [resumeId]);
+
   const fetchMatches = async () => {
-    if (!resumeId) return;
+    if (!activeId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getMatches(resumeId, {
+      const data = await getMatches(activeId, {
         min_score: minScore,
         limit: 50,
       });
       setMatches(data.results);
       setTotal(data.total);
+
+      // Auto compute if total matches is 0
+      if (data.total === 0 && !summary) {
+        handleCompute();
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.detail || 'Failed to fetch match scores.');
@@ -37,18 +63,24 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
   };
 
   useEffect(() => {
-    fetchMatches();
-  }, [resumeId, minScore]);
+    if (activeId) {
+      fetchMatches();
+    }
+  }, [activeId, minScore]);
 
   const handleCompute = async () => {
-    if (!resumeId) return;
+    if (!activeId) return;
     setComputing(true);
     setError(null);
-    setSummary(null);
     try {
-      const res = await computeMatches(resumeId);
+      const res = await computeMatches(activeId);
       setSummary(res);
-      fetchMatches();
+      const data = await getMatches(activeId, {
+        min_score: minScore,
+        limit: 50,
+      });
+      setMatches(data.results);
+      setTotal(data.total);
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.detail || 'Failed to compute matches.');
@@ -58,15 +90,15 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
   };
 
   // Guard: No active resume
-  if (!resumeId) {
+  if (!activeId && !loading) {
     return (
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 text-center max-w-xl mx-auto my-12 backdrop-blur-sm">
+      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 text-center max-w-xl mx-auto my-12 backdrop-blur-sm shadow-xl">
         <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4">
           <AlertCircle className="w-7 h-7" />
         </div>
         <h3 className="text-xl font-bold text-slate-100">Upload a Resume First</h3>
         <p className="text-slate-400 text-sm mt-2">
-          To calculate semantic matches and skill gaps against job postings, you must first upload and parse your resume.
+          To calculate semantic matches and skill gaps against job postings, simply upload your candidate resume.
         </p>
         <Link
           to="/resume"
@@ -102,13 +134,13 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
   const sortedMatches = [...matches].sort((a, b) => (sortAsc ? a.score - b.score : b.score - a.score));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-6xl mx-auto">
       {/* ── Header & Compute Action ──────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-100 tracking-tight">Semantic Matching Engine</h2>
           <p className="text-slate-400 text-sm mt-1">
-            Scores open vacancies against your active resume using local <code className="text-emerald-400 font-mono">all-MiniLM-L6-v2</code> embeddings.
+            Scores open vacancies against your active resume using fast <code className="text-emerald-400 font-mono">all-MiniLM-L6-v2</code> embeddings.
           </p>
         </div>
 
@@ -125,7 +157,7 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
           ) : (
             <>
               <Sparkles className="w-4 h-4" />
-              Compute Matches
+              Re-Calculate Matches
             </>
           )}
         </button>
@@ -207,7 +239,7 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
               ) : sortedMatches.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-12 text-center text-slate-500">
-                    No matches found above {Math.round(minScore * 100)}% threshold. Click <strong>"Compute Matches"</strong> above or lower the minimum score slider.
+                    No matches found above {Math.round(minScore * 100)}% threshold. Lower the slider or click <strong>"Re-Calculate Matches"</strong> above.
                   </td>
                 </tr>
               ) : (
@@ -249,7 +281,7 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-slate-600">—</span>
+                          <span className="text-slate-500 text-xs">No direct overlap</span>
                         )}
                       </td>
                       <td className="py-4 px-6">
@@ -258,19 +290,19 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
                             {m.missing_skills.slice(0, 3).map((skill, idx) => (
                               <span
                                 key={idx}
-                                className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                                className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-rose-500/10 text-rose-300 border border-rose-500/20"
                               >
                                 {skill}
                               </span>
                             ))}
                             {m.missing_skills.length > 3 && (
                               <span className="text-[10px] text-slate-500 self-center">
-                                +{m.missing_skills.length - 3}
+                                +{m.missing_skills.length - 3} more
                               </span>
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-emerald-400/80 font-medium">None (Full Coverage)</span>
+                          <span className="text-slate-500 text-xs">None</span>
                         )}
                       </td>
                       <td className="py-4 px-6 text-right">
@@ -279,13 +311,13 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
                             href={job.apply_url}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-all"
                           >
                             Apply
                             <ExternalLink className="w-3 h-3" />
                           </a>
                         ) : (
-                          <span className="text-xs text-slate-600">—</span>
+                          <span className="text-slate-600 text-xs">No URL</span>
                         )}
                       </td>
                     </tr>
@@ -294,9 +326,6 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
               )}
             </tbody>
           </table>
-        </div>
-        <div className="py-3 px-6 border-t border-slate-800 text-xs text-slate-400 bg-slate-950/40">
-          Showing {sortedMatches.length} matches (Score ≥ {Math.round(minScore * 100)}%)
         </div>
       </div>
     </div>

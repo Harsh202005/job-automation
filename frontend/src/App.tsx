@@ -5,6 +5,7 @@ import { ResumePage } from './pages/ResumePage';
 import { JobsPage } from './pages/JobsPage';
 import { MatchesPage } from './pages/MatchesPage';
 import { ApplicationsPage } from './pages/ApplicationsPage';
+import { getLatestResume } from './lib/api';
 
 export const App: React.FC = () => {
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null);
@@ -13,6 +14,18 @@ export const App: React.FC = () => {
     const saved = localStorage.getItem('autoapply_resume_id');
     if (saved) {
       setActiveResumeId(saved);
+    } else {
+      // Auto-discover the latest uploaded resume
+      getLatestResume()
+        .then((resume) => {
+          if (resume && resume.id) {
+            setActiveResumeId(resume.id);
+            localStorage.setItem('autoapply_resume_id', resume.id);
+          }
+        })
+        .catch(() => {
+          // No resumes uploaded yet, perfectly normal
+        });
     }
   }, []);
 
@@ -31,7 +44,10 @@ export const App: React.FC = () => {
             element={<ResumePage onResumeUploaded={handleResumeUploaded} />}
           />
           <Route path="jobs" element={<JobsPage />} />
-          <Route path="matches" element={<MatchesPage resumeId={activeResumeId} />} />
+          <Route
+            path="matches"
+            element={<MatchesPage resumeId={activeResumeId} />}
+          />
           <Route
             path="applications"
             element={<ApplicationsPage resumeId={activeResumeId} />}

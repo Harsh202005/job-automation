@@ -50,7 +50,7 @@ export interface Job {
   description?: string;
   apply_url: string;
   posted_at?: string | null;
-  fetched_at: string;
+  fetched_at?: string;
 }
 
 export interface IngestSummary {
@@ -62,20 +62,26 @@ export interface IngestSummary {
 
 export interface MatchDetail {
   id: string;
-  resume_id: string;
+  resume_id?: string;
   job_id: string;
   score: number;
   matched_skills: string[];
   missing_skills: string[];
-  computed_at: string;
-  job?: Job;
+  computed_at?: string | null;
+  job?: Job | null;
 }
 
 export interface ComputeMatchesSummary {
-  resume_id: string;
   total_jobs: number;
   matches_computed: number;
   top_score: number;
+  errors?: string[];
+}
+
+export interface UploadResumeResponse extends ParsedResume {
+  auto_matched?: boolean;
+  matching_summary?: ComputeMatchesSummary | null;
+  top_matches?: MatchDetail[];
 }
 
 export interface ApplicationJobInfo {
@@ -116,14 +122,34 @@ export interface ApplyBatchSummary {
   }[];
 }
 
+export interface PipelineRunResponse {
+  id: string;
+  resume_id: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_seconds?: number | null;
+  ingest_summary?: IngestSummary | null;
+  matching_summary?: ComputeMatchesSummary | null;
+  apply_summary?: ApplyBatchSummary | null;
+  error_log?: string[] | null;
+}
+
 // ── API Functions ───────────────────────────────────────────────────────────
 
 // Resume API
-export async function uploadResume(file: File): Promise<ParsedResume> {
+export async function uploadResume(
+  file: File,
+  options: { autoMatch?: boolean; topMatchesLimit?: number } = { autoMatch: true, topMatchesLimit: 6 }
+): Promise<UploadResumeResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await apiClient.post<ParsedResume>('/api/resume/upload', formData, {
+  const res = await apiClient.post<UploadResumeResponse>('/api/resume/upload', formData, {
+    params: {
+      auto_match: options.autoMatch ?? true,
+      top_matches_limit: options.topMatchesLimit ?? 6,
+    },
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return res.data;
@@ -131,6 +157,11 @@ export async function uploadResume(file: File): Promise<ParsedResume> {
 
 export async function getResume(resumeId: string): Promise<ParsedResume> {
   const res = await apiClient.get<ParsedResume>(`/api/resume/${resumeId}`);
+  return res.data;
+}
+
+export async function getLatestResume(): Promise<ParsedResume> {
+  const res = await apiClient.get<ParsedResume>('/api/resume/latest');
   return res.data;
 }
 
@@ -187,4 +218,15 @@ export async function getApplications(params?: {
 
 export function getApplicationScreenshotUrl(applicationId: string): string {
   return `${API_BASE_URL}/api/applications/${applicationId}/screenshot`;
+}
+
+// Pipeline Autonomous Trigger
+export async function triggerFullPipeline(
+  resumeId: string,
+  params?: { min_score?: number; limit?: number }
+): Promise<PipelineRunResponse> {
+  const res = await apiClient.post<PipelineRunResponse>(`/api/pipeline/run/${resumeId}`, null, {
+    params,
+  });
+  return res.data;
 }

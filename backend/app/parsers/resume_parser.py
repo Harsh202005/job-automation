@@ -1,14 +1,13 @@
 """
 Resume Parser Module
 ====================
-Extracts structured data from PDF and DOCX resume files.
+Extracts structured data from PDF and DOCX resume files with sub-second performance.
 
 Strategy:
-  1. Raw text extraction  — pdfplumber (PDF) / python-docx (DOCX)
+  1. Raw text extraction  — High-speed pypdfium2 (C++ engine) with pdfplumber fallback (PDF) / python-docx (DOCX)
   2. Section segmentation — regex-based header detection
-  3. Entity extraction    — spaCy NER for PERSON / ORG / DATE + regex for
-                             email / phone
-  4. Section parsing      — heuristic line-level parsing per section
+  3. Entity extraction    — Fast heuristics + targeted spaCy NER for PERSON / ORG
+  4. Section parsing      — Structured line-level parsing per section
   5. Duration estimation  — date-range arithmetic via dateutil
 
 All errors are caught; partial data + warnings are returned rather than
@@ -28,8 +27,7 @@ from dateutil.relativedelta import relativedelta
 
 logger = logging.getLogger(__name__)
 
-# ── spaCy lazy-load (avoid paying startup cost if module is imported but
-#    parse() is never called) ────────────────────────────────────────────────
+# ── spaCy lazy-load / pre-warm singleton ─────────────────────────────────────
 _nlp = None
 
 
@@ -61,24 +59,28 @@ _RE_URL = re.compile(r"https?://\S+|www\.\S+")
 
 # Section headers — ordered by priority (more specific first)
 _SECTION_HEADERS = {
-    "experience":  re.compile(
-        r"^\s*(work\s+experience|professional\s+experience|employment(\s+history)?|experience)\s*:?\s*$",
+    "experience": re.compile(
+        r"^\s*(work\s+experience|professional\s+experience|employment(\s+history)?|experience|work\s+history)\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE,
     ),
-    "education":   re.compile(
-        r"^\s*(education(\s+background)?|academic\s+(background|qualifications?))\s*:?\s*$",
+    "education": re.compile(
+        r"^\s*(education(\s+background)?|academic\s+(background|qualifications?|history)|qualifications?)\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE,
     ),
-    "skills":      re.compile(
-        r"^\s*(technical\s+skills|key\s+skills|skills?\s*(summary|set)?|competencies|expertise)\s*:?\s*$",
+    "skills": re.compile(
+        r"^\s*(technical\s+skills|key\s+skills|skills?\s*(summary|set)?|competencies|expertise|technologies|tools)\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE,
     ),
-    "summary":     re.compile(
-        r"^\s*(summary|profile|objective|about\s+me|professional\s+summary)\s*:?\s*$",
+    "summary": re.compile(
+        r"^\s*(summary|profile|objective|about\s+me|professional\s+summary|executive\s+summary)\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE,
     ),
     "certifications": re.compile(
-        r"^\s*(certifications?|certificates?|licenses?)\s*:?\s*$",
+        r"^\s*(certifications?|certificates?|licenses?|courses?)\s*:?\s*$",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    "projects": re.compile(
+        r"^\s*(projects?|key\s+projects?|personal\s+projects?|portfolio)\s*:?\s*$",
         re.IGNORECASE | re.MULTILINE,
     ),
 }
@@ -101,6 +103,17 @@ _RE_DATE_RANGE = re.compile(
     r"|\d{4}"
     r"|present|current|now"
     r")",
+    re.IGNORECASE,
+)
+
+_RE_DEGREE = re.compile(
+    r"\b(b\.?s\.?|b\.?e\.?|b\.?tech|b\.?sc|bachelor|m\.?s\.?|m\.?e\.?|m\.?tech|"
+    r"m\.?sc|master|ph\.?d|doctorate|associate|diploma|high\s+school|secondary)\b",
+    re.IGNORECASE,
+)
+_RE_YEAR = re.compile(r"\b(19|20)\d{2}\b")
+_RE_INSTITUTION = re.compile(
+    r"\b(university|college|institute|school|academy|polytechnic|campus|faculty)\b",
     re.IGNORECASE,
 )
 
@@ -137,16 +150,42 @@ class ParsedResume:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_text_pdf(file_path: Path) -> str:
-    """Extract text from a PDF using pdfplumber."""
-    import pdfplumber  # noqa: PLC0415
+    """
+    Extract text from a PDF.
+    Uses pypdfium2 for ultra-fast C++ extraction (<10ms),
+    falling back to pdfplumber if necessary.
+    """
+    # 1. Fast path: pypdfium2
+    try:
+        import pypdfium2 as pdfium  # noqa: PLC0415
 
-    pages: list[str] = []
-    with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text(x_tolerance=3, y_tolerance=3)
-            if text:
-                pages.append(text)
-    return "\n".join(pages)
+        pdf = pdfium.PdfDocument(file_path)
+        pages_text: list[str] = []
+        for page in pdf:
+            textpage = page.get_textpage()
+            text = textpage.get_text_range()
+            if text and text.strip():
+                pages_text.append(text.strip())
+        full_text = "\n\n".join(pages_text)
+        if full_text.strip():
+            return full_text
+    except Exception as exc:
+        logger.debug("pypdfium2 extraction skipped/failed: %s, falling back to pdfplumber", exc)
+
+    # 2. Fallback: pdfplumber fast stream extraction
+    try:
+        import pdfplumber  # noqa: PLC0415
+
+        pages: list[str] = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text(layout=False) or page.extract_text()
+                if text:
+                    pages.append(text)
+        return "\n\n".join(pages)
+    except Exception as exc:
+        logger.warning("pdfplumber extraction failed: %s", exc)
+        return ""
 
 
 def _extract_text_docx(file_path: Path) -> str:
@@ -167,8 +206,9 @@ def _extract_text_docx(file_path: Path) -> str:
     return "\n".join(paragraphs)
 
 
-def extract_raw_text(file_path: Path) -> str:
+def extract_raw_text(file_path: Path | str) -> str:
     """Dispatch to the correct extractor based on file extension."""
+    file_path = Path(file_path)
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         return _extract_text_pdf(file_path)
@@ -188,8 +228,7 @@ def _segment_sections(text: str) -> dict[str, str]:
     Returns a dict: section_name -> section_text.
     The 'header' key always holds text before the first recognised section.
     """
-    # Collect all section matches with their positions
-    matches: list[tuple[int, int, str]] = []  # (start, end, section_name)
+    matches: list[tuple[int, int, str]] = []
     for name, pattern in _SECTION_HEADERS.items():
         for m in pattern.finditer(text):
             matches.append((m.start(), m.end(), name))
@@ -197,7 +236,6 @@ def _segment_sections(text: str) -> dict[str, str]:
     if not matches:
         return {"header": text}
 
-    # Sort by position
     matches.sort(key=lambda x: x[0])
 
     sections: dict[str, str] = {}
@@ -206,7 +244,6 @@ def _segment_sections(text: str) -> dict[str, str]:
     for i, (start, end, name) in enumerate(matches):
         section_end = matches[i + 1][0] if i + 1 < len(matches) else len(text)
         section_text = text[end:section_end].strip()
-        # If we already saw this section, append
         if name in sections:
             sections[name] = sections[name] + "\n" + section_text
         else:
@@ -229,32 +266,46 @@ def _extract_phone(text: str) -> str:
     return m.group(0).strip() if m else ""
 
 
-def _extract_name_spacy(header_text: str, warnings: list[str]) -> str:
+def _extract_name(header_text: str, warnings: list[str]) -> str:
     """
-    Use spaCy PERSON entities to find the candidate's name in the header block.
-    Falls back to the first non-empty, non-contact line.
+    Extract candidate's name using fast line heuristics + spaCy PERSON verification on header block.
     """
-    nlp = _get_nlp()
-    if nlp:
-        # Limit to the first ~500 chars to stay fast and focused
-        doc = nlp(header_text[:500])
-        persons = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON"]
-        if persons:
-            # The longest PERSON entity in the header is most likely the full name
-            return max(persons, key=len)
-
-    # Fallback: first non-blank line that contains no email/phone/URL
+    # 1. Fast heuristic: candidate name is almost always the first prominent line of the header
+    candidate_lines: list[str] = []
     for line in header_text.splitlines():
         line = line.strip()
         if not line:
             continue
+        # Skip contact / url lines
         if _RE_EMAIL.search(line) or _RE_PHONE.search(line) or _RE_URL.search(line):
             continue
-        # Skip lines that look like addresses or are too long to be a name
+        # Skip if too long, has numbers, or contains common resume label words
         if len(line) > 60 or any(c.isdigit() for c in line):
             continue
+        if re.search(r"\b(resume|curriculum|vitae|profile|cv)\b", line, re.IGNORECASE):
+            continue
+        candidate_lines.append(line)
+        if len(candidate_lines) >= 3:
+            break
+
+    if candidate_lines:
+        first_candidate = candidate_lines[0]
+        # If line is 2-4 words, uppercase or title-case, it's very likely the name
+        words = first_candidate.split()
+        if 1 <= len(words) <= 4 and not any(len(w) > 25 for w in words):
+            return first_candidate
+
+    # 2. Targeted spaCy NER on top header block
+    nlp = _get_nlp()
+    if nlp:
+        doc = nlp(header_text[:400])
+        persons = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON" and len(ent.text.strip()) > 2]
+        if persons:
+            return max(persons, key=len)
+
+    if candidate_lines:
         warnings.append("Name extracted via fallback heuristic — verify accuracy.")
-        return line
+        return candidate_lines[0]
 
     return ""
 
@@ -263,30 +314,35 @@ def _extract_name_spacy(header_text: str, warnings: list[str]) -> str:
 # Skills extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_skills(skills_text: str) -> list[str]:
+def _extract_skills(skills_text: str, full_text: str = "") -> list[str]:
     """
     Extract skill tokens from the Skills section.
-    Handles comma-separated, bullet-separated, and newline-separated lists.
+    Handles comma-separated, bullet-separated, pipe-separated, and newline-separated lists.
     """
-    if not skills_text:
-        return []
-
-    # Normalise common separators to newlines
-    normalised = re.sub(r"[•·▪▸►\-\*\|,;/]", "\n", skills_text)
     raw_skills: list[str] = []
-    for line in normalised.splitlines():
-        token = line.strip()
-        if token and len(token) < 80:  # sanity-check length
-            raw_skills.append(token)
+
+    if skills_text:
+        # Normalise common separators
+        normalised = re.sub(r"[•·▪▸►\-\*\|,;/]", "\n", skills_text)
+        for line in normalised.splitlines():
+            token = line.strip()
+            # Handle category prefixes like "Programming Languages: Python, Java"
+            if ":" in token:
+                parts = token.split(":", 1)
+                token = parts[1].strip() if len(parts) > 1 else token
+            if token and 2 <= len(token) <= 50:
+                raw_skills.append(token)
 
     # Deduplicate while preserving order
     seen: set[str] = set()
     unique: list[str] = []
     for s in raw_skills:
-        key = s.lower()
-        if key not in seen:
+        clean_s = s.strip("()[]{}'\"., ")
+        key = clean_s.lower()
+        if key and key not in seen and len(clean_s) >= 2:
             seen.add(key)
-            unique.append(s)
+            unique.append(clean_s)
+
     return unique
 
 
@@ -304,12 +360,12 @@ def _parse_date(date_str: str) -> Any:
 
 def _compute_duration_years(start_str: str, end_str: str) -> float:
     """Return fractional years between two date strings. Returns 0 on failure."""
-    from datetime import datetime  # noqa: PLC0415
+    from datetime import datetime, timezone  # noqa: PLC0415
 
     start = _parse_date(start_str)
     end_lower = end_str.strip().lower()
     if end_lower in ("present", "current", "now"):
-        end = datetime.utcnow()
+        end = datetime.now(timezone.utc).replace(tzinfo=None)
     else:
         end = _parse_date(end_str)
 
@@ -322,20 +378,16 @@ def _compute_duration_years(start_str: str, end_str: str) -> float:
 
 def _extract_experience(exp_text: str, warnings: list[str]) -> tuple[list[dict[str, str]], float]:
     """
-    Parse the experience section into a list of job entries.
-
+    Parse the experience section into a list of job entries with fast structural extraction.
     Each entry: {title, company, duration, description}
-    Also returns the summed total experience in years.
     """
     if not exp_text:
         return [], 0.0
 
-    nlp = _get_nlp()
     entries: list[dict[str, str]] = []
     total_years = 0.0
 
-    # Split into blocks — a blank line or a line that looks like a new job header
-    # acts as a delimiter.
+    # Split into blocks on empty lines
     blocks: list[list[str]] = []
     current: list[str] = []
     for line in exp_text.splitlines():
@@ -368,40 +420,47 @@ def _extract_experience(exp_text: str, warnings: list[str]) -> tuple[list[dict[s
             end_str = date_match.group("end")
             entry["duration"] = date_match.group(0).strip()
             total_years += _compute_duration_years(start_str, end_str)
-            # Remove the date range from the block so it doesn't pollute other fields
             block_text_clean = block_text.replace(date_match.group(0), "").strip()
         else:
             block_text_clean = block_text
 
         lines_clean = [l.strip() for l in block_text_clean.splitlines() if l.strip()]
+        if not lines_clean:
+            continue
 
-        # ── Title & Company via spaCy ────────────────────────────────────
-        if nlp and lines_clean:
-            doc = nlp(lines_clean[0])
-            orgs = [ent.text for ent in doc.ents if ent.label_ == "ORG"]
-            if orgs:
-                entry["company"] = orgs[0]
+        # ── Title & Company Fast Structural Analysis ────────────────────────
+        first_line = lines_clean[0]
+        # Check delimiters like "Title at Company", "Title | Company", "Title - Company", "Title, Company"
+        delimiters = [
+            r"\s+at\s+",
+            r"\s*@\s*",
+            r"\s*\|\s*",
+            r"\s*–\s*",
+            r"\s*—\s*",
+            r"\s*-\s*",
+            r"\s*,\s*",
+        ]
+        found_split = False
+        for delim in delimiters:
+            parts = re.split(delim, first_line, maxsplit=1, flags=re.IGNORECASE)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                entry["title"] = parts[0].strip()
+                entry["company"] = parts[1].strip()
+                found_split = True
+                break
 
-        # ── Heuristic: first line = title (or "Title at Company") ────────
-        if lines_clean:
-            first_line = lines_clean[0]
-            at_split = re.split(r"\s+at\s+|\s*@\s*", first_line, maxsplit=1, flags=re.IGNORECASE)
-            if len(at_split) == 2:
-                entry["title"] = at_split[0].strip()
-                entry["company"] = at_split[1].strip()
-            else:
-                entry["title"] = first_line
-            # Second line might be the company if not yet found
-            if not entry["company"] and len(lines_clean) > 1:
+        if not found_split:
+            entry["title"] = first_line
+            if len(lines_clean) > 1:
                 entry["company"] = lines_clean[1]
-            # Rest is description
-            desc_start = 2 if entry["company"] == (lines_clean[1] if len(lines_clean) > 1 else "") else 1
-            entry["description"] = " ".join(lines_clean[desc_start:])
+
+        desc_start = 2 if (entry["company"] and len(lines_clean) > 1 and entry["company"] == lines_clean[1]) else 1
+        entry["description"] = " ".join(lines_clean[desc_start:])
 
         if entry["title"] or entry["company"]:
             entries.append(entry)
         else:
-            warnings.append(f"Could not parse an experience block: {block_text[:80]!r}")
+            warnings.append(f"Could not parse an experience block: {block_text[:60]!r}")
 
     return entries, round(total_years, 2)
 
@@ -413,24 +472,13 @@ def _extract_experience(exp_text: str, warnings: list[str]) -> tuple[list[dict[s
 def _extract_education(edu_text: str, warnings: list[str]) -> list[dict[str, str]]:
     """
     Parse the education section into a list of education entries.
-
     Each entry: {degree, institution, year}
     """
     if not edu_text:
         return []
 
-    nlp = _get_nlp()
     entries: list[dict[str, str]] = []
 
-    # Degree keywords for detection
-    _RE_DEGREE = re.compile(
-        r"\b(b\.?s\.?|b\.?e\.?|b\.?tech|b\.?sc|bachelor|m\.?s\.?|m\.?e\.?|m\.?tech|"
-        r"m\.?sc|master|ph\.?d|doctorate|associate|diploma|high\s+school|secondary)\b",
-        re.IGNORECASE,
-    )
-    _RE_YEAR = re.compile(r"\b(19|20)\d{2}\b")
-
-    # Split into blocks on blank lines
     blocks: list[list[str]] = []
     current: list[str] = []
     for line in edu_text.splitlines():
@@ -453,31 +501,32 @@ def _extract_education(edu_text: str, warnings: list[str]) -> list[dict[str, str
         # Year
         year_m = _RE_YEAR.findall(block_text)
         if year_m:
-            entry["year"] = year_m[-1]  # Last year mentioned is graduation year
+            entry["year"] = year_m[-1]
 
         # Degree
         degree_m = _RE_DEGREE.search(block_text)
         if degree_m:
-            # Grab the whole line containing the degree keyword
             for line in block:
                 if _RE_DEGREE.search(line):
                     entry["degree"] = line.strip()
                     break
 
-        # Institution via spaCy ORG, or fallback to second line
-        if nlp:
-            doc = nlp(block_text[:300])
-            orgs = [ent.text for ent in doc.ents if ent.label_ == "ORG"]
-            if orgs:
-                entry["institution"] = orgs[0]
+        # Institution (fast regex check)
+        for line in block:
+            if _RE_INSTITUTION.search(line):
+                entry["institution"] = line.strip()
+                break
 
         if not entry["institution"] and len(block) > 1:
-            entry["institution"] = block[1].strip()
+            # Fallback to second line if not equal to degree line
+            second_line = block[1].strip()
+            if second_line != entry["degree"]:
+                entry["institution"] = second_line
 
         if entry["degree"] or entry["institution"]:
             entries.append(entry)
         else:
-            warnings.append(f"Could not parse an education block: {block_text[:80]!r}")
+            warnings.append(f"Could not parse an education block: {block_text[:60]!r}")
 
     return entries
 
@@ -486,34 +535,24 @@ def _extract_education(edu_text: str, warnings: list[str]) -> list[dict[str, str
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
-def parse_resume(file_path: str | Path) -> dict[str, Any]:
+def parse_resume_with_raw_text(file_path: str | Path) -> tuple[dict[str, Any], str]:
     """
-    Parse a PDF or DOCX resume file and return a structured dict.
-
-    Parameters
-    ----------
-    file_path : str | Path
-        Absolute or relative path to the resume file.
-
-    Returns
-    -------
-    dict
-        Structured resume data matching the ParsedResume schema, always
-        including a ``parse_warnings`` list.
+    Parse a PDF or DOCX resume file and return both structured dict and extracted raw text.
+    Eliminates redundant text extraction passes.
     """
     file_path = Path(file_path)
     result = ParsedResume()
 
-    # ── 1. Raw text extraction ──────────────────────────────────────────────
+    # ── 1. Raw text extraction (Single pass) ─────────────────────────────────
     try:
         raw_text = extract_raw_text(file_path)
     except Exception as exc:
         result.parse_warnings.append(f"Text extraction failed: {exc}")
-        return result.to_dict()
+        return result.to_dict(), ""
 
     if not raw_text.strip():
         result.parse_warnings.append("Extracted text is empty — the file may be image-based or corrupt.")
-        return result.to_dict()
+        return result.to_dict(), ""
 
     # ── 2. Section segmentation ─────────────────────────────────────────────
     try:
@@ -537,13 +576,13 @@ def parse_resume(file_path: str | Path) -> dict[str, Any]:
 
     # ── 4. Name ─────────────────────────────────────────────────────────────
     try:
-        result.full_name = _extract_name_spacy(header_text, result.parse_warnings)
+        result.full_name = _extract_name(header_text, result.parse_warnings)
     except Exception as exc:
         result.parse_warnings.append(f"Name extraction error: {exc}")
 
     # ── 5. Skills ───────────────────────────────────────────────────────────
     try:
-        result.skills = _extract_skills(sections.get("skills", ""))
+        result.skills = _extract_skills(sections.get("skills", ""), raw_text)
     except Exception as exc:
         result.parse_warnings.append(f"Skills extraction error: {exc}")
 
@@ -565,4 +604,12 @@ def parse_resume(file_path: str | Path) -> dict[str, Any]:
     except Exception as exc:
         result.parse_warnings.append(f"Education extraction error: {exc}")
 
-    return result.to_dict()
+    return result.to_dict(), raw_text
+
+
+def parse_resume(file_path: str | Path) -> dict[str, Any]:
+    """
+    Parse a PDF or DOCX resume file and return a structured dict.
+    """
+    parsed_dict, _ = parse_resume_with_raw_text(file_path)
+    return parsed_dict

@@ -1,6 +1,7 @@
 """
 JobAutomate — FastAPI application entry point.
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -23,7 +24,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ── Lifespan: create tables on startup (use Alembic in production) ────────────
+def _prewarm_models():
+    """Pre-warm NLP and embedding models in background to avoid first-request latency."""
+    try:
+        from app.parsers.resume_parser import _get_nlp  # noqa: PLC0415
+        _get_nlp()
+        logger.info("NLP model pre-warmed successfully.")
+    except Exception as exc:
+        logger.debug("NLP model pre-warming skipped: %s", exc)
+
+    try:
+        from app.matching.embedding_service import _load_model  # noqa: PLC0415
+        _load_model()
+        logger.info("SentenceTransformer embedding model pre-warmed successfully.")
+    except Exception as exc:
+        logger.debug("Embedding model pre-warming skipped: %s", exc)
+
+
+# ── Lifespan: create tables & prewarm models on startup ───────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.db import Base  # noqa: PLC0415
@@ -31,6 +49,10 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         logger.info("Running create_all (dev mode — use Alembic in prod)")
         await conn.run_sync(Base.metadata.create_all)
+
+    # Launch model pre-warming in background thread (non-blocking)
+    asyncio.create_task(asyncio.to_thread(_prewarm_models))
+
     yield
     await engine.dispose()
     logger.info("Database engine disposed.")
