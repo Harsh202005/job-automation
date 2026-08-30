@@ -79,6 +79,7 @@ export interface Job {
   location?: string | null;
   description?: string;
   apply_url: string;
+  skills?: string[];
   posted_at?: string | null;
   fetched_at?: string;
 }
@@ -87,11 +88,12 @@ export interface IngestSummary {
   fetched: number;
   new: number;
   updated: number;
-  errors: number;
+  errors: number | string[];
 }
 
 export interface MatchDetail {
   id: string;
+  match_id?: string;
   resume_id?: string;
   job_id: string;
   score: number;
@@ -102,9 +104,14 @@ export interface MatchDetail {
 }
 
 export interface ComputeMatchesSummary {
-  total_jobs: number;
-  matches_computed: number;
-  top_score: number;
+  resume_id?: string;
+  total_jobs?: number;
+  jobs_evaluated?: number;
+  matches_computed?: number;
+  matches_created?: number;
+  matches_updated?: number;
+  min_score_threshold?: number;
+  top_score?: number;
   errors?: string[];
 }
 
@@ -221,9 +228,10 @@ export async function computeMatches(resumeId: string): Promise<ComputeMatchesSu
 
 export async function getMatches(
   resumeId: string,
-  params?: { min_score?: number; limit?: number; offset?: number }
+  params?: { min_score?: number; limit?: number; offset?: number },
+  signal?: AbortSignal
 ): Promise<{ total: number; resume_id: string; limit: number; offset: number; results: MatchDetail[] }> {
-  const res = await apiClient.get(`/api/matches/${resumeId}`, { params });
+  const res = await apiClient.get(`/api/matches/${resumeId}`, { params, signal });
   return res.data;
 }
 
