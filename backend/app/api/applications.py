@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.apply.apply_service import run_apply_batch
+from app.core.auth import verify_api_key
 from app.core.db import get_db
 from app.models.application import Application
 from app.models.job import Job
@@ -38,6 +39,7 @@ router = APIRouter(prefix="/api/applications", tags=["Applications"])
 async def trigger_apply_batch(
     resume_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _auth: bool = Depends(verify_api_key),
     min_score: Annotated[
         float,
         Query(ge=0.0, le=1.0, description="Minimum match similarity score to apply (default: 0.5)"),

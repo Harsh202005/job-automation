@@ -51,6 +51,20 @@ async def run_full_pipeline(
     started_at = datetime.now(timezone.utc)
     errors: list[dict[str, Any]] = []
 
+    # Check for active running pipeline for this candidate to prevent concurrent runs
+    from datetime import timedelta
+    from sqlalchemy import select
+    active_q = select(PipelineRun).where(
+        PipelineRun.resume_id == resume_id,
+        PipelineRun.status == "running",
+        PipelineRun.started_at >= started_at - timedelta(minutes=15),
+    )
+    active_res = await db.execute(active_q)
+    active_run = active_res.scalar_one_or_none()
+    if active_run:
+        logger.warning("Pipeline run rejected: another run %s is currently in progress", active_run.id)
+        raise RuntimeError(f"A pipeline execution ({active_run.id}) is already in progress.")
+
     logger.info("Starting automated pipeline run %s for resume %s", run_id, resume_id)
 
     pipeline_run = PipelineRun(

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import verify_api_key
 from app.core.db import get_db
 from app.matching.matching_service import compute_match, run_matching_for_resume
 from app.models.job import Job
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/api/matches", tags=["Matches"])
 async def compute_matches(
     resume_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _auth: bool = Depends(verify_api_key),
     job_limit: Annotated[
         int | None,
         Query(
@@ -188,6 +190,7 @@ def _match_to_dict(match: Match, include_full_description: bool = False) -> dict
             job_data["description"] = job.description
 
     return {
+        "id": str(match.id),
         "match_id": str(match.id),
         "resume_id": str(match.resume_id),
         "score": match.score,

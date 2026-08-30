@@ -22,6 +22,10 @@ jobs:
             echo "::error::Secret RESUME_ID is missing. Add it in Repo Settings > Secrets and variables > Actions"
             exit 1
           fi
+          if [ -z "${{ secrets.PIPELINE_API_KEY }}" ]; then
+            echo "::error::Secret PIPELINE_API_KEY is missing. Add it in Repo Settings > Secrets and variables > Actions"
+            exit 1
+          fi
 
       - name: Ping Backend & Execute Pipeline
         env:

@@ -15,6 +15,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.aggregators.ingestion_service import run_ingestion
+from app.core.auth import verify_api_key
 from app.core.db import get_db
 from app.models.job import Job
 
@@ -31,7 +32,10 @@ router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
     summary="Trigger job ingestion from all configured ATS sources",
     response_description="Ingestion summary with counts and any non-fatal errors",
 )
-async def ingest_jobs(db: AsyncSession = Depends(get_db)):
+async def ingest_jobs(
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Depends(verify_api_key),
+):
     """
     Pulls job postings from all **Greenhouse** board tokens and **Lever** company
     slugs defined in the environment (`GREENHOUSE_BOARD_TOKENS`, `LEVER_COMPANY_SLUGS`),
