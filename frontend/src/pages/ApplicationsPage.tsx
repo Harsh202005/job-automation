@@ -8,6 +8,9 @@ interface ApplicationsPageProps {
 }
 
 export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({ resumeId }) => {
+  const [activeId, setActiveId] = useState<string | null>(
+    resumeId || localStorage.getItem('autoapply_resume_id')
+  );
   const [applications, setApplications] = useState<ApplicationItem[]>([]);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -19,13 +22,22 @@ export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({ resumeId }) 
   const [error, setError] = useState<string | null>(null);
   const [selectedScreenshotUrl, setSelectedScreenshotUrl] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (resumeId) {
+      setActiveId(resumeId);
+    } else {
+      const saved = localStorage.getItem('autoapply_resume_id');
+      if (saved) setActiveId(saved);
+    }
+  }, [resumeId]);
+
   const fetchApplications = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getApplications({
         status: statusFilter === 'all' ? undefined : statusFilter,
-        resume_id: resumeId || undefined,
+        resume_id: activeId || undefined,
         limit: 50,
       });
       setApplications(data.results);
@@ -40,15 +52,15 @@ export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({ resumeId }) 
 
   useEffect(() => {
     fetchApplications();
-  }, [resumeId, statusFilter]);
+  }, [activeId, statusFilter]);
 
   const handleRunBatch = async () => {
-    if (!resumeId) return;
+    if (!activeId) return;
     setApplying(true);
     setError(null);
     setSummary(null);
     try {
-      const res = await runApplyBatch(resumeId, {
+      const res = await runApplyBatch(activeId, {
         min_score: minScore,
         limit: batchLimit,
       });
@@ -63,7 +75,7 @@ export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({ resumeId }) 
   };
 
   // Guard: No active resume
-  if (!resumeId) {
+  if (!activeId) {
     return (
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 text-center max-w-xl mx-auto my-12 backdrop-blur-sm">
         <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4">
