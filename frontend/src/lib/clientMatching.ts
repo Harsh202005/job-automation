@@ -302,3 +302,29 @@ export function computeClientMatches(
     .filter((m) => m.score >= minScore)
     .sort((a, b) => b.score - a.score);
 }
+
+/**
+ * Resolves a reliable, active direct URL for any job vacancy.
+ * Converts old or 404-prone IDs into live search/posting queries.
+ */
+export function getDirectJobUrl(job?: Job | null): string {
+  if (!job) return '#';
+  const url = (job.apply_url || '').trim();
+
+  if (url.includes('linkedin.com/jobs/view/')) {
+    const q = `${job.company || ''} ${job.title || ''} ${job.location || 'India'}`.trim();
+    return `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(q)}`;
+  }
+
+  if (url.includes('naukri.com/job-listings-') || url.includes('naukri.com/jobs/')) {
+    const compSlug = (job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '-');
+    return `https://www.naukri.com/${compSlug}-jobs-in-pune`;
+  }
+
+  if (!url || url.length < 5 || url === '#') {
+    const q = `${job.company || ''} ${job.title || ''} jobs apply`.trim();
+    return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  }
+
+  return url;
+}

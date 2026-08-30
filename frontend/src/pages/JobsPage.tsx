@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getJobs, ingestJobs, ingestScraperJobs, Job, IngestSummary, ScraperIngestSummary } from '../lib/api';
-import { CURATED_JOBS } from '../lib/clientMatching';
+import { CURATED_JOBS, getDirectJobUrl } from '../lib/clientMatching';
 import {
   DownloadCloud,
   Search,
@@ -373,7 +373,7 @@ export const JobsPage: React.FC = () => {
                     </td>
                     <td className="py-4 px-6 text-right">
                       <a
-                        href={job.apply_url}
+                        href={getDirectJobUrl(job)}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 font-semibold px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all"

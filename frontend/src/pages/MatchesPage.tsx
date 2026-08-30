@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { computeMatches, getMatches, getLatestResume, MatchDetail, ComputeMatchesSummary } from '../lib/api';
-import { computeClientMatches } from '../lib/clientMatching';
+import { computeClientMatches, getDirectJobUrl } from '../lib/clientMatching';
 import {
   Sparkles,
   Building2,
@@ -645,19 +645,15 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
 
                       {/* Apply Action */}
                       <td className="py-4 px-5 text-right whitespace-nowrap">
-                        {job?.apply_url ? (
-                          <a
-                            href={job.apply_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 text-xs font-semibold rounded-lg border border-slate-700 hover:border-emerald-500 transition-all shadow-sm"
-                          >
-                            Apply
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        ) : (
-                          <span className="text-slate-600 text-xs">No link</span>
-                        )}
+                        <a
+                          href={getDirectJobUrl(job)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-emerald-400 text-xs font-semibold rounded-lg border border-slate-700 hover:border-emerald-500 transition-all shadow-sm"
+                        >
+                          Apply Direct
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
                       </td>
                     </tr>
                   );
