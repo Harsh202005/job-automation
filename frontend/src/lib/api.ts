@@ -80,6 +80,9 @@ export interface Job {
   description?: string;
   apply_url: string;
   skills?: string[];
+  experience_level?: 'Fresher' | 'Junior' | 'Mid' | 'Senior';
+  workplace_type?: 'Remote' | 'On-site' | 'Hybrid';
+  country?: string;
   posted_at?: string | null;
   fetched_at?: string;
 }
