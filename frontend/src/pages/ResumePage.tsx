@@ -458,29 +458,42 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
             </div>
           </div>
 
-          {/* Work Experience */}
+          {/* Brief Summary */}
+          {parsedData.summary && (
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-2.5">
+                <Sparkles className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Brief Summary</h3>
+              </div>
+              <p className="text-slate-300 text-xs leading-relaxed bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
+                {parsedData.summary}
+              </p>
+            </div>
+          )}
+
+          {/* Work Experience & Internships */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-4">
               <Briefcase className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Work Experience & Internships</h3>
             </div>
             {parsedData.experience && parsedData.experience.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3.5">
                 {parsedData.experience.map((exp, idx) => (
                   <div key={idx} className="p-4 rounded-xl bg-slate-950/50 border border-slate-800/80">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
                       <div>
-                        <h4 className="font-semibold text-slate-200 text-sm">{exp.title}</h4>
-                        <p className="text-xs text-emerald-400 font-medium">{exp.company}</p>
+                        <h4 className="font-bold text-slate-100 text-sm">{exp.title}</h4>
+                        <p className="text-xs text-emerald-400 font-semibold mt-0.5">{exp.company}</p>
                       </div>
                       {exp.duration && (
-                        <span className="text-[11px] text-slate-500 px-2 py-0.5 bg-slate-800/60 rounded-md border border-slate-700/50">
+                        <span className="text-[11px] text-slate-400 px-2.5 py-0.5 bg-slate-800/80 rounded-md border border-slate-700/60 self-start">
                           {exp.duration}
                         </span>
                       )}
                     </div>
                     {exp.description && (
-                      <p className="text-xs text-slate-400 mt-2 line-clamp-3 leading-relaxed whitespace-pre-line">
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed whitespace-pre-line">
                         {exp.description}
                       </p>
                     )}
@@ -492,6 +505,92 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
             )}
           </div>
 
+          {/* Featured Projects */}
+          {parsedData.projects && parsedData.projects.length > 0 && (
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Target className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Featured Projects</h3>
+              </div>
+              <div className="space-y-3.5">
+                {parsedData.projects.map((proj, idx) => (
+                  <div key={idx} className="p-4 rounded-xl bg-slate-950/50 border border-slate-800/80">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-slate-100 text-sm">{proj.title}</h4>
+                        {proj.duration && <span className="text-[11px] text-slate-500">{proj.duration}</span>}
+                      </div>
+                      {proj.link && (
+                        <a
+                          href={proj.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 self-start"
+                        >
+                          View Repository / Project <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                    {proj.description && (
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                        {proj.description}
+                      </p>
+                    )}
+                    {proj.skills && proj.skills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2.5">
+                        {proj.skills.map((s, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded bg-slate-800/80 text-[11px] text-slate-300 border border-slate-700/60">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Assessments & Certifications */}
+          {parsedData.certifications && parsedData.certifications.length > 0 && (
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Assessments & Certifications</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {parsedData.certifications.map((cert, idx) => (
+                  <div key={idx} className="p-4 rounded-xl bg-slate-950/50 border border-slate-800/80 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="font-bold text-slate-100 text-sm">{cert.name}</h4>
+                        {cert.issuer && (
+                          <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 shrink-0">
+                            {cert.issuer}
+                          </span>
+                        )}
+                      </div>
+                      {cert.description && (
+                        <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                          {cert.description}
+                        </p>
+                      )}
+                    </div>
+                    {cert.skills && cert.skills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-3 pt-2 border-t border-slate-800/60">
+                        {cert.skills.map((s, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded bg-slate-800/60 text-[10px] text-slate-300">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Education */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-4">
@@ -499,12 +598,12 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
               <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">Education</h3>
             </div>
             {parsedData.education && parsedData.education.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                 {parsedData.education.map((edu, idx) => (
-                  <div key={idx} className="p-3.5 rounded-xl bg-slate-950/50 border border-slate-800/80">
-                    <h4 className="font-semibold text-slate-200 text-sm">{edu.degree}</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">{edu.institution}</p>
-                    {edu.year && <p className="text-[11px] text-slate-500 mt-1">Year: {edu.year}</p>}
+                  <div key={idx} className="p-4 rounded-xl bg-slate-950/50 border border-slate-800/80">
+                    <h4 className="font-bold text-slate-100 text-sm">{edu.degree}</h4>
+                    <p className="text-xs text-slate-400 mt-1">{edu.institution}</p>
+                    {edu.year && <p className="text-[11px] text-emerald-400 font-medium mt-2">{edu.year}</p>}
                   </div>
                 ))}
               </div>

@@ -39,15 +39,33 @@ export interface EducationItem {
   year?: string;
 }
 
+export interface ProjectItem {
+  title: string;
+  skills?: string[];
+  link?: string;
+  duration?: string;
+  description?: string;
+}
+
+export interface CertificationItem {
+  name: string;
+  issuer?: string;
+  skills?: string[];
+  description?: string;
+}
+
 export interface ParsedResume {
   id: string;
   filename: string;
   full_name: string;
   email: string;
   phone: string;
+  summary?: string;
   skills: string[];
   experience: ExperienceItem[];
   education: EducationItem[];
+  projects?: ProjectItem[];
+  certifications?: CertificationItem[];
   total_experience_years: number;
   parse_warnings: string[];
 }

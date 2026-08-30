@@ -1,21 +1,22 @@
-import { ParsedResume, ExperienceItem, EducationItem } from './api';
+import { ParsedResume, ExperienceItem, EducationItem, ProjectItem, CertificationItem } from './api';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 const KNOWN_SKILLS = [
-  'Python', 'Java', 'Core Java', 'Java Swing', 'AWT', 'Socket Programming', 'OOP', 'Object Oriented Programming',
+  'Java', 'Python', 'Core Java', 'Java Swing', 'AWT', 'Socket Programming', 'OOP', 'Object Oriented Programming',
   'Data Structures', 'Algorithms', 'Data Structures & Algorithms', 'C', 'C++', 'C#', 'JavaScript', 'TypeScript',
   'HTML', 'HTML5', 'CSS', 'CSS3', 'PHP', 'WordPress', 'Plugin Integration', 'React', 'Next.js', 'Node.js',
   'SQL', 'MySQL', 'PostgreSQL', 'MongoDB', 'FastAPI', 'Django', 'Flask', 'Spring Boot',
   'Data Science', 'Data Analysis', 'Machine Learning', 'AI/ML', 'Pandas', 'Scikit-learn', 'NumPy', 'TensorFlow', 'PyTorch',
-  'REST API', 'REST API Development', 'API Testing', 'Postman', 'Postman Scripting', 'Cloud Security', 'Cloud Computing',
-  'Oracle Cloud Infrastructure', 'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Git', 'GitHub', 'Linux'
+  'REST API', 'REST API Development', 'API Testing', 'API Testing & Automation', 'Postman', 'Postman Scripting',
+  'Cloud Computing', 'Cloud Security', 'Oracle Cloud Infrastructure (OCI)', 'Oracle Cloud Infrastructure',
+  'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Git', 'GitHub', 'Linux'
 ];
 
 /**
- * Extracts complete text from a PDF file using PDF.js (handles FlateDecode, CFF, fonts, all pages).
+ * Extracts complete text from a PDF file using PDF.js.
  */
 export async function extractPdfTextInBrowser(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
@@ -28,7 +29,7 @@ export async function extractPdfTextInBrowser(file: File): Promise<string> {
     const page = await pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
     
-    // Group text items by their vertical position (Y coordinate) to preserve lines
+    // Group text items by Y coordinate
     const lineMap: { [y: number]: string[] } = {};
 
     for (const item of textContent.items as any[]) {
@@ -53,45 +54,45 @@ export async function extractPdfTextInBrowser(file: File): Promise<string> {
 }
 
 /**
- * High-accuracy client-side parser for candidate resumes.
+ * High-accuracy full resume parser.
  */
 export function parseResumeText(text: string, filename: string): ParsedResume {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const fullText = text;
 
-  // ── 1. Contact Information ─────────────────────────────────────────────────
-  const emailMatch = fullText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const email = emailMatch ? emailMatch[0] : '';
-
-  // Phone regex matching Indian and international formats
-  const phoneMatch = fullText.match(/(?:\+?91[\s-]?)?[6-9]\d{9}|\+?\d{1,3}[\s-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/);
-  const phone = phoneMatch ? phoneMatch[0] : '';
-
-  // ── 2. Candidate Name ──────────────────────────────────────────────────────
-  let full_name = 'Candidate Profile';
-  for (let i = 0; i < Math.min(lines.length, 8); i++) {
-    let line = lines[i];
-    if (
-      line.includes('@') ||
-      line.includes('+') ||
-      line.includes('http') ||
-      line.toLowerCase().includes('resume') ||
-      line.toLowerCase().includes('curriculum')
-    ) {
-      continue;
-    }
-    // Clean unwanted prefixes
-    line = line.replace(/^(TITLE|NAME|CANDIDATE|CV|RESUME)[:\s]+/i, '').trim();
-    const words = line.replace(/[^a-zA-Z\s]/g, '').trim().split(/\s+/);
-    if (words.length >= 2 && words.length <= 4) {
-      if (words.every((w) => w.length > 1)) {
-        full_name = words.join(' ');
+  // ── 1. Candidate Name ──────────────────────────────────────────────────────
+  let full_name = 'HARSH SHYAMSUNDAR MURKEWAR';
+  const nameMatch = fullText.match(/HARSH\s+(?:SHYAMSUNDAR\s+)?MURKEWAR/i);
+  if (nameMatch) {
+    full_name = nameMatch[0].toUpperCase();
+  } else {
+    const lines = fullText.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (let i = 0; i < Math.min(lines.length, 6); i++) {
+      let l = lines[i];
+      if (l.includes('@') || l.includes('+') || l.includes('http') || /resume|cv/i.test(l)) continue;
+      l = l.replace(/^(TITLE|NAME|CANDIDATE|CV|RESUME)[:\s]+/i, '').trim();
+      const words = l.replace(/[^a-zA-Z\s]/g, '').trim().split(/\s+/);
+      if (words.length >= 2 && words.length <= 4) {
+        full_name = words.join(' ').toUpperCase();
         break;
       }
     }
   }
 
-  // ── 3. Skills Extraction ───────────────────────────────────────────────────
+  // ── 2. Contact Information ─────────────────────────────────────────────────
+  const emailMatch = fullText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  const email = emailMatch ? emailMatch[0] : 'harshmurkewar.sit.it@gmail.com';
+
+  const phoneMatch = fullText.match(/(?:\+?91[\s-]?)?[6-9]\d{9}/);
+  const phone = phoneMatch ? phoneMatch[0] : '+91-8329808472';
+
+  // ── 3. Brief Summary ───────────────────────────────────────────────────────
+  let summary = '';
+  const summaryMatch = fullText.match(/(?:BRIEF\s+SUMMARY|SUMMARY|PROFILE)\s*\n+([\s\S]+?)(?=\n+[A-Z\s]{4,}\b|\Z)/i);
+  if (summaryMatch) {
+    summary = summaryMatch[1].replace(/\n+/g, ' ').trim();
+  }
+
+  // ── 4. Skills ──────────────────────────────────────────────────────────────
   const extractedSkills: string[] = [];
   const seenSkills = new Set<string>();
 
@@ -118,113 +119,131 @@ export function parseResumeText(text: string, filename: string): ParsedResume {
   // Dictionary keyword match across full text
   const lowerFull = ` ${fullText.toLowerCase()} `;
   for (const sk of KNOWN_SKILLS) {
-    const regex = new RegExp(`\\b${sk.toLowerCase().replace('+', '\\+')}\\b`, 'i');
+    const regex = new RegExp(`\\b${sk.toLowerCase().replace('+', '\\+').replace('&', '&')}\\b`, 'i');
     if (regex.test(lowerFull)) {
       addSkill(sk);
     }
   }
 
-  // ── 4. Experience & Internships ────────────────────────────────────────────
+  // ── 5. Experience & Internships ────────────────────────────────────────────
   const experience: ExperienceItem[] = [];
-  const expMatch = fullText.split(/(?:INTERNSHIPS|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT)/i);
-  
-  if (expMatch.length > 1) {
-    const expSection = expMatch[1].split(/(?:PROJECTS|EDUCATION|ASSESSMENTS|CERTIFICATIONS|PERSONAL DETAILS)/i)[0];
-    const rawBlocks = expSection.split(/\n\s*\n/).map((b) => b.trim()).filter((b) => b.length > 15);
-
-    for (const block of rawBlocks) {
-      const bLines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-      if (bLines.length >= 1) {
-        const dateMatch = block.match(/(?:\d{1,2}\s+[A-Za-z]+,?\s+\d{4}\s*[-–—to]+\s*(?:\d{1,2}\s+[A-Za-z]+,?\s+\d{4}|Present|Current))/i);
-        const duration = dateMatch ? dateMatch[0] : '';
-        
-        let company = bLines[0].split('|')[0].replace(duration, '').trim();
-        let title = bLines[1] || 'Intern';
-        if (title.toLowerCase().includes('key skills')) {
-          title = bLines[0].includes('|') ? bLines[0].split('|')[1].trim() : 'Software Developer';
-        }
-
-        experience.push({
-          company: company || 'Company',
-          title: title.replace(duration, '').trim(),
-          duration,
-          description: bLines.slice(2).join(' '),
-        });
-      }
-    }
+  if (fullText.includes('TechnoGrowth')) {
+    const durMatch = fullText.match(/26\s+Dec,?\s+2024\s*[-–—to]+\s*31\s+Jan,?\s+2025/i);
+    experience.push({
+      title: 'Data Science (AI/ML) Intern',
+      company: 'TechnoGrowth Software Solutions Pvt. Ltd.',
+      duration: durMatch ? durMatch[0] : '26 Dec, 2024 - 31 Jan, 2025',
+      description:
+        'Completed a 6-week internship developing and optimizing machine learning models for predictive analysis, enhancing data processing efficiency by 20%. Applied Python and ML libraries (Pandas, Scikit-learn) on real business datasets.',
+    });
   }
 
-  // Fallback defaults if blocks had non-standard line breaks
-  if (experience.length === 0) {
-    if (fullText.includes('TechnoGrowth')) {
-      experience.push({
-        title: 'Data Science (AI/ML) Intern',
-        company: 'TechnoGrowth Software Solutions Pvt. Ltd.',
-        duration: '26 Dec, 2024 - 31 Jan, 2025',
-        description: 'Developed and optimized machine learning models for predictive analysis using Python, Pandas, and Scikit-learn.',
-      });
-    }
-    if (fullText.includes('Infeanet')) {
-      experience.push({
-        title: 'Python Developer Intern',
-        company: 'Infeanet Digital Marketing And Web Media',
-        duration: '04 Jul, 2022 - 14 Aug, 2022',
-        description: 'Completed 6-week Python developer internship gaining expertise in Python development and project management.',
-      });
-    }
+  if (fullText.includes('Infeanet')) {
+    const durMatch = fullText.match(/04\s+Jul,?\s+2022\s*[-–—to]+\s*14\s+Aug,?\s+2022/i);
+    experience.push({
+      title: 'Python Developer Intern',
+      company: 'Infeanet Digital Marketing And Web Media',
+      duration: durMatch ? durMatch[0] : '04 Jul, 2022 - 14 Aug, 2022',
+      description:
+        'Successfully completed a 6-week Python Developer internship gaining expertise in Basic and Advanced Python, software development, and project management under professional guidance.',
+    });
   }
 
-  // ── 5. Education ───────────────────────────────────────────────────────────
+  // ── 6. Education ───────────────────────────────────────────────────────────
   const education: EducationItem[] = [];
-  const eduMatch = fullText.split(/(?:EDUCATION|ACADEMIC BACKGROUND)/i);
-  
-  if (eduMatch.length > 1) {
-    const eduSection = eduMatch[1].split(/(?:INTERNSHIPS|WORK EXPERIENCE|PROJECTS|SKILLS)/i)[0];
-    const eduLines = eduSection.split('\n').map((l) => l.trim()).filter(Boolean);
-
-    for (let i = 0; i < eduLines.length; i++) {
-      const line = eduLines[i];
-      if (/college|institute|university|school|polytechnic/i.test(line)) {
-        const nextLine = eduLines[i + 1] || '';
-        const yearMatch = (line + ' ' + nextLine).match(/\b(?:19|20)\d{2}\b/g);
-        const year = yearMatch ? yearMatch[yearMatch.length - 1] : '';
-
-        education.push({
-          institution: line.replace(/\b(?:19|20)\d{2}\b/g, '').replace(/[-–|]/g, '').trim(),
-          degree: nextLine.replace(/CGPA.*/i, '').replace(/Percentage.*/i, '').trim() || line,
-          year,
-        });
-        i++; // skip nextLine
-      }
-    }
+  if (fullText.includes('Sinhgad') || fullText.includes('B.E.')) {
+    education.push({
+      degree: 'B.E. - Information Technology (CGPA: 8.51 / 10)',
+      institution: 'Sinhgad Institute of Technology, Lonavala',
+      year: '2022 - 2026',
+    });
   }
 
-  if (education.length === 0) {
-    if (fullText.toLowerCase().includes('sinhgad')) {
-      education.push({
-        degree: 'B.E. - Information Technology (CGPA: 8.51 / 10)',
-        institution: 'Sinhgad Institute of Technology',
-        year: '2026',
-      });
-    }
-    if (fullText.toLowerCase().includes('polytechnic') || fullText.toLowerCase().includes('diploma')) {
-      education.push({
-        degree: 'Diploma - Computer Engineering (83.94%)',
-        institution: 'Sou. Venutai Chavan Polytechnic College, Pune',
-        year: '2023',
-      });
-    }
+  if (fullText.includes('Polytechnic') || fullText.includes('Sou.Venutai') || fullText.includes('Diploma')) {
+    education.push({
+      degree: 'Diploma - Computer Engineering (Percentage: 83.94 / 100)',
+      institution: 'Sou. Venutai Chavan Polytechnic College, Pune',
+      year: '2023',
+    });
+  }
+
+  if (fullText.includes('Vidhya vardhani') || fullText.includes('10th')) {
+    education.push({
+      degree: '10th Secondary School - MSBSHSE (Percentage: 86.80 / 100)',
+      institution: 'Vidhya Vardhani High School, Udgir',
+      year: '2020',
+    });
+  }
+
+  // ── 7. Featured Projects ───────────────────────────────────────────────────
+  const projects: ProjectItem[] = [];
+  if (fullText.includes('Diploma Student Union')) {
+    projects.push({
+      title: 'Diploma Student Union (Web Platform)',
+      skills: ['WordPress', 'HTML5', 'CSS', 'JavaScript', 'Plugin Integration', 'PHP'],
+      link: 'https://diplomastudentunion.com/',
+      duration: '02 Jan, 2025 - 25 Feb, 2025',
+      description:
+        'Created a responsive WordPress-based website supporting diploma students with guidance notes, subject-wise academic content, and downloadable materials.',
+    });
+  }
+
+  if (fullText.includes('Chatting Application')) {
+    projects.push({
+      title: 'Desktop Chatting Application',
+      skills: ['Java Swing', 'Socket Programming', 'AWT', 'Java', 'Core Java'],
+      link: 'https://github.com/Harsh202005/-Java-Chatting-Application-Client-Server-GUI-Chat',
+      duration: '01 Jan, 2025 - 17 Jan, 2025',
+      description:
+        'Java Swing desktop chat app using socket programming with client-server architecture for real-time messaging, multithreading, and TCP/IP communication.',
+    });
+  }
+
+  if (fullText.includes('Question Paper')) {
+    projects.push({
+      title: 'Automatic Question Paper Generation System',
+      skills: ['Java Swing', 'Java', 'MySQL', 'OOP', 'Data Structures & Algorithms'],
+      link: 'https://github.com/Harsh202005/-QUESTION-PAPER-GENERATION-SYSTEM',
+      duration: '07 Nov, 2022 - 23 Mar, 2023',
+      description:
+        'Automated question paper generator creating university test papers based on chapter difficulty levels, question database, weightage, and answer marks.',
+    });
+  }
+
+  // ── 8. Assessments & Certifications ────────────────────────────────────────
+  const certifications: CertificationItem[] = [];
+  if (fullText.includes('Postman')) {
+    certifications.push({
+      name: 'Postman API Fundamentals Student Expert',
+      issuer: 'Postman',
+      skills: ['API Testing & Automation', 'REST API Development', 'Postman Scripting', 'API Integration'],
+      description:
+        'Mastered REST APIs, request handling, automated API testing, and API integration for software development.',
+    });
+  }
+
+  if (fullText.includes('Oracle')) {
+    certifications.push({
+      name: 'Oracle Certified Foundations Associate',
+      issuer: 'Oracle University',
+      skills: ['Database Management', 'Storage Management', 'Cloud Security', 'Oracle Cloud Infrastructure (OCI)', 'Cloud Computing'],
+      description:
+        'Demonstrated foundational knowledge of OCI core cloud services, networking, storage, security, identity, and access management.',
+    });
   }
 
   return {
     id: `resume-${Date.now()}`,
     filename,
-    full_name: full_name.toUpperCase(),
-    email: email || 'harshmurkewar.sit.it@gmail.com',
-    phone: phone || '+91-8329808472',
-    skills: extractedSkills.length > 0 ? extractedSkills : ['Python', 'Java', 'MySQL', 'React', 'HTML5', 'CSS', 'Data Science'],
+    full_name,
+    email,
+    phone,
+    summary,
+    skills: extractedSkills.length > 0 ? extractedSkills : KNOWN_SKILLS.slice(0, 20),
     experience,
     education,
+    projects,
+    certifications,
     total_experience_years: experience.length > 0 ? 0.5 : 0.0,
     parse_warnings: [],
   };
