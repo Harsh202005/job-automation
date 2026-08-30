@@ -58,12 +58,18 @@ export function parseResumeText(text: string, filename: string): ParsedResume {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const fullText = text;
 
-  // ── 1. Dynamic Contact Information ─────────────────────────────────────────
+  // ── 1. Dynamic Contact Information & Direct Links ─────────────────────────
   const emailMatch = fullText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   const email = emailMatch ? emailMatch[0] : '';
 
   const phoneMatch = fullText.match(/(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}|\+?91[\s-]?[6-9]\d{9}/);
   const phone = phoneMatch ? phoneMatch[0] : '';
+
+  const linkedinMatch = fullText.match(/https?:\/\/(?:www\.)?linkedin\.com\/in\/[a-zA-Z0-9_.-]+/i);
+  const linkedin = linkedinMatch ? linkedinMatch[0] : '';
+
+  const githubMatch = fullText.match(/https?:\/\/(?:www\.)?github\.com\/[a-zA-Z0-9_.-]+/i);
+  const github = githubMatch ? githubMatch[0] : '';
 
   // ── 2. Dynamic Candidate Name ──────────────────────────────────────────────
   let full_name = 'Candidate Profile';
@@ -306,6 +312,8 @@ export function parseResumeText(text: string, filename: string): ParsedResume {
     full_name,
     email,
     phone,
+    linkedin,
+    github,
     summary,
     skills: extractedSkills,
     experience,

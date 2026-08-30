@@ -60,6 +60,8 @@ export interface ParsedResume {
   full_name: string;
   email: string;
   phone: string;
+  linkedin?: string;
+  github?: string;
   summary?: string;
   skills: string[];
   experience: ExperienceItem[];

@@ -21,7 +21,9 @@ import {
   Target,
   RefreshCw,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Globe,
+  Link2
 } from 'lucide-react';
 
 interface ResumePageProps {
@@ -411,7 +413,7 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
                   <User className="w-5 h-5 text-emerald-400" />
                   <h3 className="text-xl font-bold text-slate-100">{parsedData.full_name || 'Candidate Profile'}</h3>
                 </div>
-                <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-400">
+                <div className="flex flex-wrap items-center gap-3.5 mt-2.5 text-xs text-slate-400">
                   {parsedData.email && (
                     <span className="flex items-center gap-1.5">
                       <Mail className="w-3.5 h-3.5 text-slate-500" />
@@ -424,11 +426,29 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
                       {parsedData.phone}
                     </span>
                   )}
-                  {parsedData.filename && (
-                    <span className="flex items-center gap-1.5 text-slate-500">
-                      <FileText className="w-3.5 h-3.5" />
-                      {parsedData.filename}
-                    </span>
+                  {parsedData.linkedin && (
+                    <a
+                      href={parsedData.linkedin}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/20 transition-all font-medium"
+                    >
+                      <Globe className="w-3 h-3" />
+                      LinkedIn
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                  {parsedData.github && (
+                    <a
+                      href={parsedData.github}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all font-medium"
+                    >
+                      <Link2 className="w-3 h-3 text-emerald-400" />
+                      GitHub
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
                   )}
                 </div>
               </div>
@@ -525,9 +545,10 @@ export const ResumePage: React.FC<ResumePageProps> = ({ onResumeUploaded }) => {
                           href={proj.link}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 self-start"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-mono font-medium rounded-lg border border-emerald-500/30 transition-all self-start max-w-full truncate"
                         >
-                          View Repository / Project <ExternalLink className="w-3 h-3" />
+                          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{proj.link}</span>
                         </a>
                       )}
                     </div>
