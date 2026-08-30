@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 10
 
-    # ── Job Aggregators ───────────────────────────────────────────
+    # ── Job Aggregators: ATS ─────────────────────────────────────
     # Comma-separated list of Greenhouse board tokens, e.g.:
     #   GREENHOUSE_BOARD_TOKENS=stripe,airbnb,notion
     greenhouse_board_tokens: list[str] = []
@@ -43,6 +43,19 @@ class Settings(BaseSettings):
     # Comma-separated list of Lever company slugs, e.g.:
     #   LEVER_COMPANY_SLUGS=netflix,linear,vercel
     lever_company_slugs: list[str] = []
+
+    # ── Job Aggregators: Adzuna API ──────────────────────────────
+    # Free developer API keys from https://developer.adzuna.com/
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
+    adzuna_country: str = "in"
+    adzuna_query: str = "software engineer"
+    adzuna_location: str = "pune"
+
+    # ── Job Aggregators: Best-Effort Scrapers ────────────────────
+    scraper_query: str = "software engineer"
+    scraper_location: str = "pune"
+    scraper_max_results: int = 20
 
     # Timeout (seconds) for outbound HTTP requests to ATS APIs
     http_timeout_seconds: float = 15.0

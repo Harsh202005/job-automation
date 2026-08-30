@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.aggregators.ingestion_service import run_ingestion
+from app.aggregators.ingestion_service import run_ingestion, run_scraper_ingestion
 from app.core.auth import verify_api_key
 from app.core.db import get_db
 from app.models.job import Job
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/jobs", tags=["Jobs"])
 @router.post(
     "/ingest",
     status_code=status.HTTP_200_OK,
-    summary="Trigger job ingestion from all configured ATS sources",
+    summary="Trigger job ingestion from all configured ATS & API sources",
     response_description="Ingestion summary with counts and any non-fatal errors",
 )
 async def ingest_jobs(
@@ -37,21 +37,37 @@ async def ingest_jobs(
     _auth: bool = Depends(verify_api_key),
 ):
     """
-    Pulls job postings from all **Greenhouse** board tokens and **Lever** company
-    slugs defined in the environment (`GREENHOUSE_BOARD_TOKENS`, `LEVER_COMPANY_SLUGS`),
+    Pulls job postings from Greenhouse, Lever, Arbeitnow, RemoteOK, and Adzuna APIs,
     then upserts them into the database.
-
-    Returns a summary:
-    ```json
-    {
-      "fetched": 42,
-      "new": 30,
-      "updated": 12,
-      "errors": []
-    }
-    ```
     """
     summary = await run_ingestion(db)
+    return summary
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/jobs/ingest-scrapers
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/ingest-scrapers",
+    status_code=status.HTTP_200_OK,
+    summary="Trigger best-effort web scraping for LinkedIn and Naukri",
+    response_description="Scraping summary with counts and diagnostics",
+)
+async def ingest_scraped_jobs(
+    query: Annotated[str | None, Query(description="Search keyword (e.g. 'software engineer')")] = None,
+    location: Annotated[str | None, Query(description="City/region (e.g. 'pune')")] = None,
+    max_results: Annotated[int, Query(ge=1, le=50, description="Max jobs to scrape per source")] = 20,
+    db: AsyncSession = Depends(get_db),
+    _auth: bool = Depends(verify_api_key),
+):
+    """
+    Launches headless browser scrapers for LinkedIn and Naukri unauthenticated search.
+    Note: These are best-effort; if a CAPTCHA or authwall is detected, they exit gracefully without raising errors.
+    """
+    summary = await run_scraper_ingestion(
+        db, query=query, location=location, max_results=max_results
+    )
     return summary
 
 

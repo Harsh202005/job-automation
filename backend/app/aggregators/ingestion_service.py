@@ -1,14 +1,15 @@
 """
-Ingestion service — coordinates fetching from all configured ATS sources
+Ingestion service — coordinates fetching from all configured ATS and Job Board sources
 and upserts results into the `jobs` table.
 
-Upsert strategy
----------------
-PostgreSQL ON CONFLICT DO UPDATE (via SQLAlchemy's insert().on_conflict_do_update).
-- NEW   → INSERT
-- CHANGED → UPDATE (all mutable fields + fetched_at)
-- UNCHANGED → no-op (excluded by the DO UPDATE's SET clause still touches fetched_at,
-  which is acceptable for idempotency)
+Supported Sources:
+- Greenhouse (Public ATS API)
+- Lever (Public ATS API)
+- Arbeitnow (Free Public Job Board API)
+- RemoteOK (Free Public Remote Jobs API)
+- Adzuna (Free Developer Job API)
+- LinkedIn (Best-effort unauthenticated scraper)
+- Naukri (Best-effort unauthenticated scraper)
 """
 from __future__ import annotations
 
@@ -21,8 +22,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.aggregators.adzuna import fetch_adzuna_jobs
+from app.aggregators.arbeitnow import fetch_arbeitnow_jobs
 from app.aggregators.greenhouse import fetch_greenhouse_jobs
 from app.aggregators.lever import fetch_lever_jobs
+from app.aggregators.linkedin_scraper import scrape_linkedin_jobs
+from app.aggregators.naukri_scraper import scrape_naukri_jobs
+from app.aggregators.remoteok import fetch_remoteok_jobs
 from app.core.config import settings
 from app.models.job import Job
 
@@ -62,6 +68,7 @@ async def _upsert_jobs(
         constraint="uq_jobs_source_source_job_id",
         set_={
             "title": stmt.excluded.title,
+            "company": stmt.excluded.company,
             "location": stmt.excluded.location,
             "description": stmt.excluded.description,
             "apply_url": stmt.excluded.apply_url,
@@ -74,13 +81,11 @@ async def _upsert_jobs(
     try:
         result = await db.execute(stmt)
         returned_ids = result.scalars().all()
-        # PostgreSQL RETURNING gives back ALL affected rows (both inserts and updates).
-        # To distinguish new vs updated we compare against pre-existing source_job_ids.
+
         source_ids = {j["source_job_id"] for j in jobs}
         sources = {j["source"] for j in jobs}
 
         # Query which of those IDs existed *before* this upsert
-        # We do this by checking if fetched_at < now (they were inserted earlier)
         pre_existing = await db.execute(
             select(Job.source_job_id).where(
                 Job.source.in_(sources),
@@ -103,71 +108,83 @@ async def _upsert_jobs(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Public API
+# Public APIs
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def run_ingestion(db: AsyncSession) -> dict[str, Any]:
     """
-    Fetch jobs from all configured Greenhouse boards and Lever company boards,
-    then upsert them into the database.
-
-    Parameters
-    ----------
-    db : AsyncSession
-        An active SQLAlchemy async session (injected by FastAPI's get_db).
+    Fetch jobs from all stable ATS and public Job APIs:
+    - Greenhouse (configured tokens)
+    - Lever (configured slugs)
+    - Arbeitnow (open API)
+    - RemoteOK (open API)
+    - Adzuna (if app_id/app_key are configured)
 
     Returns
     -------
     dict
         {
-            "fetched": int,   # total raw jobs pulled from APIs
-            "new": int,       # rows inserted for the first time
-            "updated": int,   # rows updated (already existed)
-            "errors": list[str]  # non-fatal error messages
+            "fetched": int,
+            "new": int,
+            "updated": int,
+            "errors": list[str]
         }
     """
     errors: list[str] = []
-    total_fetched = 0
     total_new = 0
     total_updated = 0
 
     gh_tokens: list[str] = settings.greenhouse_board_tokens
     lever_slugs: list[str] = settings.lever_company_slugs
 
-    if not gh_tokens and not lever_slugs:
-        logger.warning(
-            "No sources configured. Set GREENHOUSE_BOARD_TOKENS and/or "
-            "LEVER_COMPANY_SLUGS in your .env file."
-        )
-        errors.append(
-            "No sources configured. Set GREENHOUSE_BOARD_TOKENS and/or "
-            "LEVER_COMPANY_SLUGS in your .env."
-        )
-        return {"fetched": 0, "new": 0, "updated": 0, "errors": errors}
+    tasks: list[Any] = []
+    labels: list[str] = []
 
-    # ── Fetch all sources concurrently ───────────────────────────────────────
-    gh_tasks = [fetch_greenhouse_jobs(token) for token in gh_tokens]
-    lever_tasks = [fetch_lever_jobs(slug) for slug in lever_slugs]
+    # 1. Greenhouse
+    for token in gh_tokens:
+        tasks.append(fetch_greenhouse_jobs(token))
+        labels.append(f"greenhouse:{token}")
 
-    all_results = await asyncio.gather(*gh_tasks, *lever_tasks, return_exceptions=True)
+    # 2. Lever
+    for slug in lever_slugs:
+        tasks.append(fetch_lever_jobs(slug))
+        labels.append(f"lever:{slug}")
+
+    # 3. Arbeitnow (Always available free API)
+    tasks.append(fetch_arbeitnow_jobs())
+    labels.append("arbeitnow")
+
+    # 4. RemoteOK (Always available free API)
+    tasks.append(fetch_remoteok_jobs())
+    labels.append("remoteok")
+
+    # 5. Adzuna (if configured)
+    if settings.adzuna_app_id and settings.adzuna_app_key:
+        tasks.append(
+            fetch_adzuna_jobs(
+                query=settings.adzuna_query,
+                location=settings.adzuna_location,
+                app_id=settings.adzuna_app_id,
+                app_key=settings.adzuna_app_key,
+                country=settings.adzuna_country,
+            )
+        )
+        labels.append("adzuna")
+
+    all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_jobs: list[dict[str, Any]] = []
     for i, result in enumerate(all_results):
         if isinstance(result, Exception):
-            source_label = (
-                f"greenhouse:{gh_tokens[i]}" if i < len(gh_tokens)
-                else f"lever:{lever_slugs[i - len(gh_tokens)]}"
-            )
-            msg = f"Fetch error for {source_label}: {result}"
+            msg = f"Fetch error for {labels[i]}: {result}"
             logger.error(msg)
             errors.append(msg)
-        else:
+        elif isinstance(result, list):
             all_jobs.extend(result)
 
     total_fetched = len(all_jobs)
-    logger.info("Ingestion ▸ %d total jobs fetched across all sources", total_fetched)
+    logger.info("Ingestion ▸ %d total jobs fetched across %d sources", total_fetched, len(tasks))
 
-    # ── Upsert in one batch ──────────────────────────────────────────────────
     if all_jobs:
         new_count, updated_count = await _upsert_jobs(db, all_jobs, errors)
         total_new += new_count
@@ -180,4 +197,78 @@ async def run_ingestion(db: AsyncSession) -> dict[str, Any]:
         "errors": errors,
     }
     logger.info("Ingestion complete: %s", summary)
+    return summary
+
+
+async def run_scraper_ingestion(
+    db: AsyncSession,
+    query: str | None = None,
+    location: str | None = None,
+    max_results: int | None = None,
+) -> dict[str, Any]:
+    """
+    Run best-effort unauthenticated web scrapers (LinkedIn + Naukri).
+    Kept separate from automated hourly cron runs due to fragility and CAPTCHA limits.
+
+    Parameters
+    ----------
+    db : AsyncSession
+    query : str, optional
+    location : str, optional
+    max_results : int, optional
+
+    Returns
+    -------
+    dict
+        Ingestion summary with fetched, new, updated, and errors list.
+    """
+    errors: list[str] = []
+    total_new = 0
+    total_updated = 0
+
+    search_query = query or settings.scraper_query or "software engineer"
+    search_location = location or settings.scraper_location or "pune"
+    results_limit = max_results or settings.scraper_max_results or 20
+
+    logger.info(
+        "Scraper Ingestion Started ▸ Query='%s', Location='%s', MaxResults=%d",
+        search_query,
+        search_location,
+        results_limit,
+    )
+
+    tasks = [
+        scrape_linkedin_jobs(query=search_query, location=search_location, max_results=results_limit),
+        scrape_naukri_jobs(query=search_query, location=search_location, max_results=results_limit),
+    ]
+    labels = ["linkedin_scraper", "naukri_scraper"]
+
+    all_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    all_jobs: list[dict[str, Any]] = []
+    for i, result in enumerate(all_results):
+        if isinstance(result, Exception):
+            msg = f"Scraper error for {labels[i]}: {result}"
+            logger.error(msg)
+            errors.append(msg)
+        elif isinstance(result, list):
+            all_jobs.extend(result)
+
+    total_fetched = len(all_jobs)
+    logger.info("Scraper Ingestion ▸ %d total scraped jobs found", total_fetched)
+
+    if all_jobs:
+        new_count, updated_count = await _upsert_jobs(db, all_jobs, errors)
+        total_new += new_count
+        total_updated += updated_count
+
+    summary = {
+        "fetched": total_fetched,
+        "new": total_new,
+        "updated": total_updated,
+        "errors": errors,
+        "query": search_query,
+        "location": search_location,
+    }
+    logger.info("Scraper Ingestion complete: %s", summary)
     return summary

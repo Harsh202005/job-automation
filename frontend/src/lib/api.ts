@@ -209,9 +209,27 @@ export async function getLatestResume(signal?: AbortSignal): Promise<ParsedResum
   return res.data;
 }
 
+export interface ScraperIngestSummary {
+  fetched: number;
+  new: number;
+  updated: number;
+  query?: string;
+  location?: string;
+  errors: string[];
+}
+
 // Jobs API
 export async function ingestJobs(): Promise<IngestSummary> {
   const res = await apiClient.post<IngestSummary>('/api/jobs/ingest');
+  return res.data;
+}
+
+export async function ingestScraperJobs(params?: {
+  query?: string;
+  location?: string;
+  max_results?: number;
+}): Promise<ScraperIngestSummary> {
+  const res = await apiClient.post<ScraperIngestSummary>('/api/jobs/ingest-scrapers', null, { params });
   return res.data;
 }
 
