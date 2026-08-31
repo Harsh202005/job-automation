@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { getJobs, ingestJobs, ingestScraperJobs, Job, IngestSummary, ScraperIngestSummary } from '../lib/api';
 import { CURATED_JOBS, getDirectJobUrl } from '../lib/clientMatching';
-import { fetchLiveJobsRealTime } from '../lib/liveJobFetcher';
+import { fetchLiveJobsRealTime, INDIA_TECH_HUBS_JOBS } from '../lib/liveJobFetcher';
 import {
   DownloadCloud,
   Search,
@@ -19,14 +19,16 @@ import {
   Filter,
   Sparkles,
   Zap,
-  RefreshCw
+  RefreshCw,
+  Compass
 } from 'lucide-react';
 
 export const JobsPage: React.FC = () => {
-  const [allJobs, setAllJobs] = useState<Job[]>(CURATED_JOBS);
+  const [allJobs, setAllJobs] = useState<Job[]>(INDIA_TECH_HUBS_JOBS);
   const [page, setPage] = useState(1);
   const [companyFilter, setCompanyFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [locationFilter, setLocationFilter] = useState<'india' | 'pune' | 'bangalore' | 'remote' | 'all'>('india');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [ingesting, setIngesting] = useState(false);
@@ -34,7 +36,6 @@ export const JobsPage: React.FC = () => {
   const [ingestSummary, setIngestSummary] = useState<IngestSummary | null>(null);
   const [scraperSummary, setScraperSummary] = useState<ScraperIngestSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [liveCount, setLiveCount] = useState<number>(0);
 
   const PAGE_SIZE = 15;
 
@@ -45,7 +46,6 @@ export const JobsPage: React.FC = () => {
       const live = await fetchLiveJobsRealTime(force);
       if (live && live.length > 0) {
         setAllJobs(live);
-        setLiveCount(live.length);
       }
     } catch (err) {
       console.debug('Live fetch note:', err);
@@ -54,31 +54,41 @@ export const JobsPage: React.FC = () => {
     }
   };
 
-  // Background server sync
-  const syncServerJobs = async () => {
-    try {
-      const data = await getJobs({ limit: 100 });
-      if (data && data.results && data.results.length > 0) {
-        setAllJobs((prev) => {
-          const existingIds = new Set(data.results.map((j) => j.id || j.source_job_id));
-          const nonDup = prev.filter((j) => !existingIds.has(j.id) && !existingIds.has(j.source_job_id));
-          return [...data.results, ...nonDup];
-        });
-      }
-    } catch (err: any) {
-      console.debug('Using live browser network feed:', err);
-    }
-  };
-
   useEffect(() => {
     loadLiveFeed();
-    syncServerJobs();
   }, []);
 
   // Filtered & Paginated Jobs
   const filteredJobs = useMemo(() => {
     let list = [...allJobs];
 
+    // 1. Location Filter (India & Pune first)
+    if (locationFilter !== 'all') {
+      if (locationFilter === 'india') {
+        list = list.filter((j) => {
+          const loc = (j.location || '').toLowerCase();
+          const c = (j.country || '').toLowerCase();
+          return (
+            c === 'india' ||
+            loc.includes('india') ||
+            loc.includes('pune') ||
+            loc.includes('bangalore') ||
+            loc.includes('mumbai') ||
+            loc.includes('hyderabad') ||
+            j.workplace_type === 'Remote' ||
+            loc.includes('remote')
+          );
+        });
+      } else if (locationFilter === 'pune') {
+        list = list.filter((j) => (j.location || '').toLowerCase().includes('pune'));
+      } else if (locationFilter === 'bangalore') {
+        list = list.filter((j) => (j.location || '').toLowerCase().includes('bangalore'));
+      } else if (locationFilter === 'remote') {
+        list = list.filter((j) => j.workplace_type === 'Remote' || (j.location || '').toLowerCase().includes('remote'));
+      }
+    }
+
+    // 2. Keyword Search
     if (companyFilter.trim()) {
       const q = companyFilter.toLowerCase().trim();
       list = list.filter(
@@ -90,12 +100,13 @@ export const JobsPage: React.FC = () => {
       );
     }
 
+    // 3. Source Filter
     if (sourceFilter !== 'all') {
       list = list.filter((j) => (j.source || '').toLowerCase() === sourceFilter.toLowerCase());
     }
 
     return list;
-  }, [allJobs, companyFilter, sourceFilter]);
+  }, [allJobs, companyFilter, sourceFilter, locationFilter]);
 
   const total = filteredJobs.length;
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
@@ -170,14 +181,6 @@ export const JobsPage: React.FC = () => {
     }
   };
 
-  const sourcesList = [
-    { id: 'all', label: 'All Live Feeds', count: allJobs.length },
-    { id: 'arbeitnow', label: 'Arbeitnow API', count: allJobs.filter((j) => j.source === 'arbeitnow').length },
-    { id: 'remoteok', label: 'RemoteOK API', count: allJobs.filter((j) => j.source === 'remoteok').length },
-    { id: 'greenhouse', label: 'Greenhouse ATS', count: allJobs.filter((j) => j.source === 'greenhouse').length },
-    { id: 'lever', label: 'Lever ATS', count: allJobs.filter((j) => j.source === 'lever').length },
-  ];
-
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       {/* ── Page Header & Action Triggers ─────────────────────────────────── */}
@@ -187,27 +190,24 @@ export const JobsPage: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-100 tracking-tight">Real-Time Job Postings</h2>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Live Network Feed ({allJobs.length} Live Openings)
+              India & Tech Hubs Feed ({filteredJobs.length} Vacancies)
             </span>
           </div>
           <p className="text-slate-400 text-sm mt-1">
-            Real-time vacancies fetched live over HTTPS from official ATS and developer job APIs with verified application links.
+            Prioritized tech roles across Pune, Bangalore, Mumbai, Hyderabad, and Remote with direct application links.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Refresh live feed button */}
           <button
             onClick={() => loadLiveFeed(true)}
             disabled={refreshing}
             className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5"
-            title="Fetch newest postings right now"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${refreshing ? 'animate-spin' : ''}`} />
             Live Refresh
           </button>
 
-          {/* Main API Ingestion */}
           <button
             onClick={handleIngest}
             disabled={ingesting || scraping}
@@ -216,7 +216,7 @@ export const JobsPage: React.FC = () => {
             {ingesting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Ingesting Live APIs...
+                Ingesting...
               </>
             ) : (
               <>
@@ -226,7 +226,6 @@ export const JobsPage: React.FC = () => {
             )}
           </button>
 
-          {/* LinkedIn / Naukri Scrapers */}
           <button
             onClick={handleScrape}
             disabled={ingesting || scraping}
@@ -235,7 +234,7 @@ export const JobsPage: React.FC = () => {
             {scraping ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                Running Live Scrapers...
+                Scraping...
               </>
             ) : (
               <>
@@ -253,7 +252,7 @@ export const JobsPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              <strong>Real-Time Fetch Complete:</strong> Pulled {ingestSummary.fetched} active live vacancies with direct application links.
+              <strong>Real-Time Fetch Complete:</strong> Pulled {ingestSummary.fetched} active live vacancies in India and Remote.
             </span>
           </div>
           <button
@@ -265,14 +264,14 @@ export const JobsPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Filters & Source Tabs ────────────────────────────────────────── */}
+      {/* ── Location & Region Filters ────────────────────────────────────── */}
       <div className="space-y-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4 backdrop-blur-sm shadow-xl">
         {/* Search */}
         <div className="flex items-center gap-3 bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2">
           <Search className="w-4 h-4 text-slate-500 shrink-0" />
           <input
             type="text"
-            placeholder="Search live jobs by company, keyword, title, skill (e.g. Python, Java, GitLab, Cloudflare, React)..."
+            placeholder="Search roles by skill, title, company (e.g. Java, Python, TCS, Persistent, Deloitte, GitLab)..."
             value={companyFilter}
             onChange={(e) => {
               setCompanyFilter(e.target.value);
@@ -287,30 +286,81 @@ export const JobsPage: React.FC = () => {
           )}
         </div>
 
-        {/* Source Tags with Live Counts */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mr-2 flex items-center gap-1">
-            <Filter className="w-3 h-3" /> Live Channels:
+        {/* Location Filter Chips */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mr-1 flex items-center gap-1">
+            <MapPin className="w-3 h-3 text-emerald-400" /> Location:
           </span>
-          {sourcesList.map((src) => (
-            <button
-              key={src.id}
-              onClick={() => {
-                setSourceFilter(src.id);
-                setPage(1);
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
-                sourceFilter === src.id
-                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 border border-slate-700/60'
-              }`}
-            >
-              <span>{src.label}</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${sourceFilter === src.id ? 'bg-slate-950/30 text-slate-950 font-bold' : 'bg-slate-900 text-slate-400'}`}>
-                {src.count}
-              </span>
-            </button>
-          ))}
+
+          <button
+            onClick={() => {
+              setLocationFilter('india');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              locationFilter === 'india'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60'
+            }`}
+          >
+            🇮🇳 India & Remote First
+          </button>
+
+          <button
+            onClick={() => {
+              setLocationFilter('pune');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              locationFilter === 'pune'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+            }`}
+          >
+            📍 Pune, Maharashtra
+          </button>
+
+          <button
+            onClick={() => {
+              setLocationFilter('bangalore');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              locationFilter === 'bangalore'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+            }`}
+          >
+            📍 Bangalore, Karnataka
+          </button>
+
+          <button
+            onClick={() => {
+              setLocationFilter('remote');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              locationFilter === 'remote'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+            }`}
+          >
+            🌐 100% Remote
+          </button>
+
+          <button
+            onClick={() => {
+              setLocationFilter('all');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              locationFilter === 'all'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold'
+                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/60'
+            }`}
+          >
+            🌍 All Worldwide
+          </button>
         </div>
       </div>
 
@@ -332,7 +382,7 @@ export const JobsPage: React.FC = () => {
               {paginatedJobs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-slate-500">
-                    No job postings found matching "{companyFilter}". Click <strong>"Live Refresh"</strong> above.
+                    No job postings found matching your active filter. Click <strong>"Live Refresh"</strong> above.
                   </td>
                 </tr>
               ) : (
@@ -355,8 +405,8 @@ export const JobsPage: React.FC = () => {
                     <td className="py-4 px-6 text-slate-400 text-xs">
                       {job.location ? (
                         <div className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
-                          <span className="truncate max-w-[180px]">{job.location}</span>
+                          <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span className="truncate max-w-[200px] text-slate-200 font-medium">{job.location}</span>
                         </div>
                       ) : (
                         <span className="text-slate-600">Remote / Unspecified</span>
@@ -398,7 +448,7 @@ export const JobsPage: React.FC = () => {
         {/* ── Pagination ─────────────────────────────────────────────────── */}
         <div className="py-3.5 px-6 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 bg-slate-950/40">
           <span>
-            Showing {paginatedJobs.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0} to {Math.min(page * PAGE_SIZE, total)} of {total} real-time jobs
+            Showing {paginatedJobs.length > 0 ? (page - 1) * PAGE_SIZE + 1 : 0} to {Math.min(page * PAGE_SIZE, total)} of {total} jobs
           </span>
           <div className="flex items-center gap-2">
             <button
