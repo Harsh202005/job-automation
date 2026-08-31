@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { computeMatches, getMatches, getLatestResume, MatchDetail, ComputeMatchesSummary } from '../lib/api';
 import { computeClientMatches, getDirectJobUrl } from '../lib/clientMatching';
+import { fetchLiveJobsRealTime } from '../lib/liveJobFetcher';
 import {
   Sparkles,
   Building2,
@@ -66,7 +67,7 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
     }
   }, [resumeId]);
 
-  const loadLocalMatches = () => {
+  const loadLocalMatches = async (jobList?: any[]) => {
     try {
       const saved = localStorage.getItem('autoapply_parsed_resume');
       let skills: string[] = [];
@@ -74,7 +75,8 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
         const parsed = JSON.parse(saved);
         skills = parsed.skills || [];
       }
-      const localResults = computeClientMatches(skills, activeId || 'active-resume', 0.1);
+      const targetJobs = jobList && jobList.length > 0 ? jobList : await fetchLiveJobsRealTime();
+      const localResults = computeClientMatches(skills, activeId || 'active-resume', 0.1, targetJobs);
       setRawMatches(localResults);
       return localResults;
     } catch (e) {
@@ -85,7 +87,8 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
 
   const fetchMatches = async () => {
     if (!activeId) return;
-    loadLocalMatches();
+    const live = await fetchLiveJobsRealTime();
+    loadLocalMatches(live);
 
     try {
       const controller = new AbortController();
@@ -97,21 +100,17 @@ export const MatchesPage: React.FC<MatchesPageProps> = ({ resumeId }) => {
         setRawMatches(data.results);
       }
     } catch (err: any) {
-      console.debug('Server match sync note (using instant local matches):', err);
+      console.debug('Server match sync note (using live network matches):', err);
     }
   };
 
   useEffect(() => {
-    if (activeId) {
-      fetchMatches();
-    } else {
-      loadLocalMatches();
-    }
+    fetchMatches();
   }, [activeId]);
 
   const handleCompute = async () => {
     setComputing(true);
-    const updated = loadLocalMatches();
+    const updated = await loadLocalMatches();
     setSummary({
       resume_id: activeId || 'active',
       jobs_evaluated: updated.length,

@@ -511,11 +511,13 @@ export const CURATED_JOBS: Job[] = [
 export function computeClientMatches(
   candidateSkills: string[],
   resumeId: string,
-  minScore: number = 0.2
+  minScore: number = 0.2,
+  jobList?: Job[]
 ): MatchDetail[] {
   const candidateLower = new Set(candidateSkills.map((s) => s.toLowerCase().trim()));
+  const targetJobs = jobList && jobList.length > 0 ? jobList : CURATED_JOBS;
 
-  const scoredMatches: MatchDetail[] = CURATED_JOBS.map((job, idx) => {
+  const scoredMatches: MatchDetail[] = targetJobs.map((job, idx) => {
     const jobSkills = job.skills || [];
     const matched: string[] = [];
     const missing: string[] = [];
