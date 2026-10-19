@@ -188,7 +188,7 @@ Ensure all code including `.github/workflows/hourly-pipeline.yml` and `render.ya
 6. Once deployed, copy your backend URL (e.g. `https://autoapply-backend.onrender.com`) and your generated `PIPELINE_API_KEY` from the **Environment** tab.
 
 > [!NOTE]
-> **Cold Start & Keep-Alive:** Render free tier services spin down after 15 minutes of inactivity. The hourly GitHub Actions cron will keep the backend warm. The pipeline request includes `--max-time 300` to comfortably accommodate cold starts during execution.
+> **Cold Start:** Render free tier services spin down after 15 minutes of inactivity. The manual pipeline workflow includes `--max-time 300` to comfortably accommodate cold starts during execution.
 
 ### Step 3: Deploy Frontend on Vercel (Free)
 1. Sign up / log in at [Vercel.com](https://vercel.com).
